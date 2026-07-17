@@ -25,7 +25,7 @@ import { AppProvider } from './src/context/AppContext'
 import HomeScreen from './src/screens/HomeScreen'
 import TransactionsScreen from './src/screens/TransactionsScreen'
 import TransactionFormScreen from './src/screens/TransactionFormScreen'
-import GraphScreen from './src/screens/GraphScreen'
+import StatsScreen from './src/screens/StatsScreen'
 import ReportScreen from './src/screens/ReportScreen'
 import SettingsScreen from './src/screens/SettingsScreen'
 import AccountsListScreen from './src/screens/AccountsListScreen'
@@ -41,7 +41,7 @@ const Stack = createNativeStackNavigator()
 const TAB_ICONS = {
   HomeTab: ['home', 'home-outline'],
   TransactionsTab: ['swap-vertical', 'swap-vertical-outline'],
-  GraphTab: ['git-branch', 'git-branch-outline'],
+  StatsTab: ['stats-chart', 'stats-chart-outline'],
   ReportTab: ['bar-chart', 'bar-chart-outline'],
   SettingsTab: ['settings', 'settings-outline'],
 }
@@ -70,7 +70,7 @@ function Tabs() {
     >
       <Tab.Screen name="HomeTab" component={HomeScreen} options={{ title: 'Accueil' }} />
       <Tab.Screen name="TransactionsTab" component={TransactionsScreen} options={{ title: 'Transactions' }} />
-      <Tab.Screen name="GraphTab" component={GraphScreen} options={{ title: 'Graphe' }} />
+      <Tab.Screen name="StatsTab" component={StatsScreen} options={{ title: 'Stats' }} />
       <Tab.Screen name="ReportTab" component={ReportScreen} options={{ title: 'Rapport' }} />
       <Tab.Screen name="SettingsTab" component={SettingsScreen} options={{ title: 'Réglages' }} />
     </Tab.Navigator>
