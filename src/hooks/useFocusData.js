@@ -2,8 +2,24 @@
 // the screen focus/transition animation has finished, so navigation stays
 // smooth. Exposes a light `loading` flag for the first load.
 import { useCallback, useRef, useState } from 'react'
-import { InteractionManager } from 'react-native'
 import { useFocusEffect } from '@react-navigation/native'
+
+// Two rAF ticks land after the native transition has started rendering,
+// then requestIdleCallback yields to any remaining animation work.
+function runAfterTransition(cb) {
+  let cancelled = false
+  let idleHandle = null
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      if (cancelled) return
+      idleHandle = requestIdleCallback(() => { if (!cancelled) cb() }, { timeout: 300 })
+    })
+  })
+  return () => {
+    cancelled = true
+    if (idleHandle != null) cancelIdleCallback(idleHandle)
+  }
+}
 
 export function useFocusData(loadFn, deps) {
   const [loading, setLoading] = useState(true)
@@ -14,17 +30,12 @@ export function useFocusData(loadFn, deps) {
 
   useFocusEffect(
     useCallback(() => {
-      let cancelled = false
-      const task = InteractionManager.runAfterInteractions(() => {
-        if (cancelled) return
+      const cancel = runAfterTransition(() => {
         load()
         loadedOnce.current = true
         setLoading(false)
       })
-      return () => {
-        cancelled = true
-        task.cancel()
-      }
+      return cancel
     }, [load])
   )
 
