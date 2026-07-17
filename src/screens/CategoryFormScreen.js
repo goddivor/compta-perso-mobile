@@ -5,7 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import Ionicons from '@expo/vector-icons/Ionicons'
 import { useTheme, fonts } from '../theme/tokens'
 import { createCategory } from '../db/database'
-import { useApp } from '../context/AppContext'
+import { useRefresh } from '../context/AppContext'
 import { Field, Input, Segmented, Button } from '../components/ui'
 
 const COLORS = [
@@ -15,7 +15,7 @@ const COLORS = [
 
 export default function CategoryFormScreen({ navigation }) {
   const { colors } = useTheme()
-  const { refresh } = useApp()
+  const refresh = useRefresh()
   const [form, setForm] = useState({ name: '', flow: 'DEBIT', color: COLORS[0] })
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }))
 

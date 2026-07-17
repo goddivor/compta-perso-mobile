@@ -7,7 +7,7 @@ import Ionicons from '@expo/vector-icons/Ionicons'
 import { useTheme, fonts } from '../theme/tokens'
 import { listAccounts, createAccount, updateAccount, deleteAccount } from '../db/database'
 import { fmt } from '../utils/format'
-import { useApp } from '../context/AppContext'
+import { useRefresh } from '../context/AppContext'
 import { Field, Input, Segmented, Button, Card } from '../components/ui'
 
 const COLORS = [
@@ -17,7 +17,7 @@ const COLORS = [
 
 export default function AccountFormScreen({ navigation, route }) {
   const { colors } = useTheme()
-  const { refresh } = useApp()
+  const refresh = useRefresh()
   const accountId = route.params?.id ?? null
   const [account, setAccount] = useState(null)
   const [form, setForm] = useState({

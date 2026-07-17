@@ -21,7 +21,7 @@ import {
   convertTransferToSimple,
 } from '../db/database'
 import { fmt, today, shiftDay, isValidDay, fmtDay } from '../utils/format'
-import { useApp } from '../context/AppContext'
+import { useRefresh } from '../context/AppContext'
 import { Field, Input, Select, Segmented, Button, Card } from '../components/ui'
 
 const emptyForm = {
@@ -37,7 +37,7 @@ const emptyForm = {
 
 export default function TransactionFormScreen({ navigation, route }) {
   const { colors } = useTheme()
-  const { refresh } = useApp()
+  const refresh = useRefresh()
   const txId = route.params?.id ?? null
 
   const [accounts, setAccounts] = useState([])
