@@ -133,8 +133,12 @@ export default function HomeScreen({ navigation }) {
 
       <View style={styles.latestHeader}>
         <SectionTitle>Dernières transactions</SectionTitle>
-        <Pressable onPress={() => navigation.navigate('TransactionsTab')} hitSlop={8}>
-          <Text style={{ fontFamily: fonts.medium, fontSize: 12, color: colors.link }}>Tout voir</Text>
+        <Pressable
+          onPress={() => navigation.navigate('TransactionsTab')}
+          hitSlop={8}
+          style={({ pressed }) => [styles.moreBtn, { backgroundColor: pressed ? colors.surface2 : 'transparent' }]}
+        >
+          <Ionicons name="arrow-forward" size={18} color={colors.ink} />
         </Pressable>
       </View>
     </>
@@ -198,6 +202,13 @@ const styles = StyleSheet.create({
     marginHorizontal: 20,
     marginTop: 22,
     marginBottom: 10,
+  },
+  moreBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   latestWrap: {
     marginHorizontal: 20,
