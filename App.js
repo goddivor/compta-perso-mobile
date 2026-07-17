@@ -22,6 +22,8 @@ import {
 import { ThemeProvider, useTheme, fonts, palettes } from './src/theme/tokens'
 import { getDb } from './src/db/database'
 import { AppProvider } from './src/context/AppContext'
+import { FiltersProvider } from './src/context/FiltersContext'
+import FilterScreen from './src/screens/FilterScreen'
 import HomeScreen from './src/screens/HomeScreen'
 import TransactionsScreen from './src/screens/TransactionsScreen'
 import TransactionFormScreen from './src/screens/TransactionFormScreen'
@@ -118,6 +120,11 @@ function Root() {
           options={{ title: 'Transaction', ...stackHeader }}
         />
         <Stack.Screen
+          name="Filter"
+          component={FilterScreen}
+          options={{ title: 'Rechercher', presentation: 'modal', ...stackHeader }}
+        />
+        <Stack.Screen
           name="AccountsList"
           component={AccountsListScreen}
           options={({ navigation }) => ({
@@ -206,7 +213,9 @@ export default function App() {
     <SafeAreaProvider>
       <ThemeProvider>
         <AppProvider>
-          <Root />
+          <FiltersProvider>
+            <Root />
+          </FiltersProvider>
         </AppProvider>
       </ThemeProvider>
     </SafeAreaProvider>
