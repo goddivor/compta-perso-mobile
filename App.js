@@ -3,7 +3,7 @@
 // Theme: ThemeProvider (system / forced light / forced dark, persisted).
 // Perf: tabs are lazy and frozen when blurred; inactive screens detached.
 import { useEffect, useState } from 'react'
-import { View, Text, ActivityIndicator, useColorScheme } from 'react-native'
+import { View, Text, Pressable, ActivityIndicator, useColorScheme } from 'react-native'
 import { StatusBar } from 'expo-status-bar'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native'
@@ -28,6 +28,10 @@ import TransactionFormScreen from './src/screens/TransactionFormScreen'
 import GraphScreen from './src/screens/GraphScreen'
 import ReportScreen from './src/screens/ReportScreen'
 import SettingsScreen from './src/screens/SettingsScreen'
+import AccountsListScreen from './src/screens/AccountsListScreen'
+import CategoriesScreen from './src/screens/CategoriesScreen'
+import SyncScreen from './src/screens/SyncScreen'
+import ThemeScreen from './src/screens/ThemeScreen'
 import AccountFormScreen from './src/screens/AccountFormScreen'
 import CategoryFormScreen from './src/screens/CategoryFormScreen'
 
@@ -51,8 +55,8 @@ function Tabs() {
         headerShown: false,
         lazy: true,
         freezeOnBlur: true,
-        tabBarActiveTintColor: colors.ink,
-        tabBarInactiveTintColor: colors.faint,
+        tabBarActiveTintColor: colors.tabActive,
+        tabBarInactiveTintColor: colors.tabInactive,
         tabBarStyle: {
           backgroundColor: colors.surface,
           borderTopColor: colors.line,
@@ -96,6 +100,13 @@ function Root() {
     contentStyle: { backgroundColor: colors.bg },
   }
 
+  // "+" header button for the accounts/categories list sub-screens
+  const headerAdd = (navigation, target) => () => (
+    <Pressable onPress={() => navigation.navigate(target)} hitSlop={8} style={{ padding: 4 }}>
+      <Ionicons name="add" size={24} color={colors.ink} />
+    </Pressable>
+  )
+
   return (
     <NavigationContainer theme={navTheme}>
       <StatusBar style={isDark ? 'light' : 'dark'} />
@@ -105,6 +116,34 @@ function Root() {
           name="TransactionForm"
           component={TransactionFormScreen}
           options={{ title: 'Transaction', ...stackHeader }}
+        />
+        <Stack.Screen
+          name="AccountsList"
+          component={AccountsListScreen}
+          options={({ navigation }) => ({
+            title: 'Comptes',
+            ...stackHeader,
+            headerRight: headerAdd(navigation, 'AccountForm'),
+          })}
+        />
+        <Stack.Screen
+          name="Categories"
+          component={CategoriesScreen}
+          options={({ navigation }) => ({
+            title: 'Catégories',
+            ...stackHeader,
+            headerRight: headerAdd(navigation, 'CategoryForm'),
+          })}
+        />
+        <Stack.Screen
+          name="Sync"
+          component={SyncScreen}
+          options={{ title: 'Synchronisation cloud', ...stackHeader }}
+        />
+        <Stack.Screen
+          name="ThemeSettings"
+          component={ThemeScreen}
+          options={{ title: 'Thème', ...stackHeader }}
         />
         <Stack.Screen
           name="AccountForm"
