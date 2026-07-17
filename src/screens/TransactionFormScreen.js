@@ -20,9 +20,21 @@ import {
   updateTransfer,
   convertTransferToSimple,
 } from '../db/database'
-import { fmt, today, shiftDay, isValidDay, fmtDay } from '../utils/format'
+import { fmt, today, isValidDay } from '../utils/format'
 import { useRefresh } from '../context/AppContext'
 import { Field, Input, Select, Segmented, Button, Card } from '../components/ui'
+import DatePickerSheet from '../components/DatePickerSheet'
+
+// Compact long-form day label, e.g. "jeu. 17 juil. 2026"
+const fmtDayShort = (day) =>
+  isValidDay(day)
+    ? new Date(day + 'T00:00:00').toLocaleDateString('fr-FR', {
+        weekday: 'short',
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      })
+    : day
 
 const emptyForm = {
   account_id: '',
@@ -45,6 +57,7 @@ export default function TransactionFormScreen({ navigation, route }) {
   const [form, setForm] = useState(emptyForm)
   const [tx, setTx] = useState(null)
   const [applyFeeRule, setApplyFeeRule] = useState(false)
+  const [dateOpen, setDateOpen] = useState(false)
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }))
 
   useEffect(() => {
@@ -335,30 +348,24 @@ export default function TransactionFormScreen({ navigation, route }) {
           ) : null}
 
           <Field label="Date">
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <Pressable
-                onPress={() => isValidDay(form.date) && set('date', shiftDay(form.date, -1))}
-                style={[styles.dayBtn, { borderColor: colors.line, backgroundColor: colors.surface }]}
-              >
-                <Ionicons name="chevron-back" size={18} color={colors.ink} />
-              </Pressable>
-              <Input
-                value={form.date}
-                onChangeText={(v) => set('date', v)}
-                placeholder="AAAA-MM-JJ"
-                style={{ flex: 1, textAlign: 'center' }}
-              />
-              <Pressable
-                onPress={() => isValidDay(form.date) && set('date', shiftDay(form.date, 1))}
-                style={[styles.dayBtn, { borderColor: colors.line, backgroundColor: colors.surface }]}
-              >
-                <Ionicons name="chevron-forward" size={18} color={colors.ink} />
-              </Pressable>
-            </View>
-            <Text style={{ fontFamily: fonts.regular, fontSize: 11, color: isValidDay(form.date) ? colors.faint : colors.danger }}>
-              {isValidDay(form.date) ? fmtDay(form.date) : 'Format attendu : AAAA-MM-JJ'}
-            </Text>
+            <Pressable
+              onPress={() => setDateOpen(true)}
+              style={[styles.dateTrigger, { backgroundColor: colors.surface, borderColor: colors.line }]}
+            >
+              <Ionicons name="calendar-outline" size={17} color={colors.muted} />
+              <Text style={{ flex: 1, fontFamily: fonts.medium, fontSize: 14, color: colors.ink }}>
+                {fmtDayShort(form.date)}
+              </Text>
+              <Ionicons name="chevron-down" size={16} color={colors.muted} />
+            </Pressable>
           </Field>
+
+          <DatePickerSheet
+            visible={dateOpen}
+            date={form.date}
+            onClose={() => setDateOpen(false)}
+            onSelect={(d) => { set('date', d); setDateOpen(false) }}
+          />
 
           <Field label="Catégorie">
             <Select value={form.category_id} onChange={(v) => set('category_id', v)} options={categoryOptions} placeholder="— Sans catégorie —" />
@@ -400,12 +407,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
-  dayBtn: {
-    width: 48,
-    height: 48,
+  dateTrigger: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    minHeight: 48,
     borderRadius: radius.md,
     borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
+    paddingHorizontal: 14,
   },
 })
