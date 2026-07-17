@@ -264,6 +264,73 @@ export function getSummary() {
   return { total, total_electronic, total_physical, accounts }
 }
 
+// Balance history for one account: cumulative points {date, balance}
+// starting from initial_balance (desktop stats:getBalanceHistory)
+export function getBalanceHistory(accountId) {
+  const d = getDb()
+  const account = d.getFirstSync('SELECT * FROM accounts WHERE id=?', [accountId])
+  if (!account) return []
+
+  const txs = d.getAllSync(`
+    SELECT date, type, amount FROM transactions
+    WHERE account_id=? AND forecast_session_id IS NULL
+    ORDER BY date ASC, created_at ASC
+  `, [accountId])
+
+  let balance = account.initial_balance
+  const points = [{ date: String(account.created_at || '').slice(0, 10), balance }]
+
+  for (const tx of txs) {
+    balance += tx.type === 'CREDIT' ? tx.amount : -tx.amount
+    const day = String(tx.date).slice(0, 10)
+    if (points[points.length - 1].date === day) {
+      points[points.length - 1].balance = balance
+    } else {
+      points.push({ date: day, balance })
+    }
+  }
+
+  return points
+}
+
+// Total DEBIT per category (desktop stats:getExpensesByCategory)
+export function getExpensesByCategory({ account_id, date_from, date_to } = {}) {
+  const where = ["t.type='DEBIT'", 't.forecast_session_id IS NULL']
+  const params = []
+  if (account_id) { where.push('t.account_id=?'); params.push(account_id) }
+  if (date_from) { where.push('date(t.date)>=?'); params.push(date_from) }
+  if (date_to) { where.push('date(t.date)<=?'); params.push(date_to) }
+
+  return getDb().getAllSync(`
+    SELECT COALESCE(c.name,'Sans catégorie') AS name,
+           COALESCE(c.color,'#6B7280') AS color,
+           SUM(t.amount) AS total
+    FROM transactions t
+    LEFT JOIN categories c ON t.category_id = c.id
+    WHERE ${where.join(' AND ')}
+    GROUP BY t.category_id
+    ORDER BY total DESC
+  `, params)
+}
+
+// Income/expenses per month, last 12 (desktop stats:getMonthlyFlow)
+export function getMonthlyFlow({ account_id } = {}) {
+  const where = ['t.forecast_session_id IS NULL']
+  const params = []
+  if (account_id) { where.push('t.account_id=?'); params.push(account_id) }
+
+  return getDb().getAllSync(`
+    SELECT strftime('%Y-%m', t.date) AS month,
+      SUM(CASE WHEN t.type='CREDIT' THEN t.amount ELSE 0 END) AS income,
+      SUM(CASE WHEN t.type='DEBIT'  THEN t.amount ELSE 0 END) AS expenses
+    FROM transactions t
+    WHERE ${where.join(' AND ')}
+    GROUP BY month
+    ORDER BY month DESC
+    LIMIT 12
+  `, params).reverse()
+}
+
 // Daily report: aggregate per date(date), excluding forecast
 export function getDailyReport({ account_id, date_from, date_to } = {}) {
   const where = ['t.forecast_session_id IS NULL']
