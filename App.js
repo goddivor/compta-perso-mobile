@@ -1,7 +1,9 @@
 // App entry: loads Poppins, opens the local database, then mounts the
 // navigation tree (bottom tabs + native stack for the form screens).
+// Theme: ThemeProvider (system / forced light / forced dark, persisted).
+// Perf: tabs are lazy and frozen when blurred; inactive screens detached.
 import { useEffect, useState } from 'react'
-import { View, Text, ActivityIndicator } from 'react-native'
+import { View, Text, ActivityIndicator, useColorScheme } from 'react-native'
 import { StatusBar } from 'expo-status-bar'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native'
@@ -17,12 +19,13 @@ import {
   Poppins_800ExtraBold,
 } from '@expo-google-fonts/poppins'
 
-import { useTheme, fonts, palettes } from './src/theme/tokens'
+import { ThemeProvider, useTheme, fonts, palettes } from './src/theme/tokens'
 import { getDb } from './src/db/database'
 import { AppProvider } from './src/context/AppContext'
 import HomeScreen from './src/screens/HomeScreen'
 import TransactionsScreen from './src/screens/TransactionsScreen'
 import TransactionFormScreen from './src/screens/TransactionFormScreen'
+import GraphScreen from './src/screens/GraphScreen'
 import ReportScreen from './src/screens/ReportScreen'
 import SettingsScreen from './src/screens/SettingsScreen'
 import AccountFormScreen from './src/screens/AccountFormScreen'
@@ -34,6 +37,7 @@ const Stack = createNativeStackNavigator()
 const TAB_ICONS = {
   HomeTab: ['home', 'home-outline'],
   TransactionsTab: ['swap-vertical', 'swap-vertical-outline'],
+  GraphTab: ['git-branch', 'git-branch-outline'],
   ReportTab: ['bar-chart', 'bar-chart-outline'],
   SettingsTab: ['settings', 'settings-outline'],
 }
@@ -42,8 +46,11 @@ function Tabs() {
   const { colors } = useTheme()
   return (
     <Tab.Navigator
+      detachInactiveScreens
       screenOptions={({ route }) => ({
         headerShown: false,
+        lazy: true,
+        freezeOnBlur: true,
         tabBarActiveTintColor: colors.ink,
         tabBarInactiveTintColor: colors.faint,
         tabBarStyle: {
@@ -59,6 +66,7 @@ function Tabs() {
     >
       <Tab.Screen name="HomeTab" component={HomeScreen} options={{ title: 'Accueil' }} />
       <Tab.Screen name="TransactionsTab" component={TransactionsScreen} options={{ title: 'Transactions' }} />
+      <Tab.Screen name="GraphTab" component={GraphScreen} options={{ title: 'Graphe' }} />
       <Tab.Screen name="ReportTab" component={ReportScreen} options={{ title: 'Rapport' }} />
       <Tab.Screen name="SettingsTab" component={SettingsScreen} options={{ title: 'Réglages' }} />
     </Tab.Navigator>
@@ -114,6 +122,9 @@ function Root() {
 }
 
 export default function App() {
+  const system = useColorScheme() || 'light'
+  const boot = system === 'dark' ? palettes.dark : palettes.light
+
   const [fontsLoaded] = useFonts({
     Poppins_400Regular,
     Poppins_500Medium,
@@ -136,16 +147,16 @@ export default function App() {
   if (!fontsLoaded || (!dbReady && !dbError)) {
     // Loading screen while Poppins and the database initialize
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: palettes.light.bg }}>
-        <ActivityIndicator size="large" color={palettes.light.primary600} />
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: boot.bg }}>
+        <ActivityIndicator size="large" color={boot.primary600} />
       </View>
     )
   }
 
   if (dbError) {
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 30, backgroundColor: palettes.light.bg }}>
-        <Text style={{ color: palettes.light.danger, textAlign: 'center' }}>
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 30, backgroundColor: boot.bg }}>
+        <Text style={{ color: boot.danger, textAlign: 'center' }}>
           Erreur base de données : {dbError}
         </Text>
       </View>
@@ -154,9 +165,11 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <AppProvider>
-        <Root />
-      </AppProvider>
+      <ThemeProvider>
+        <AppProvider>
+          <Root />
+        </AppProvider>
+      </ThemeProvider>
     </SafeAreaProvider>
   )
 }
