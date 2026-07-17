@@ -6,13 +6,16 @@ import { memo, useCallback, useState } from 'react'
 import { View, Text, FlatList, Pressable, RefreshControl, ActivityIndicator, StyleSheet } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import Ionicons from '@expo/vector-icons/Ionicons'
-import { useTheme, fonts, radius, shadowCard } from '../theme/tokens'
+import { useTheme, fonts, radius, shadowCard, shadowOverlay } from '../theme/tokens'
 import { getSummary, listTransactions } from '../db/database'
 import { fmt } from '../utils/format'
 import { useApp } from '../context/AppContext'
 import { useFocusData } from '../hooks/useFocusData'
 import { Card, SectionTitle, EmptyState, Dot } from '../components/ui'
 import { TransactionRow } from '../components/TransactionRow'
+
+// Hero amount without currency suffix (the small "FCFA" is rendered separately)
+const fmtNumber = (n) => new Intl.NumberFormat('fr-FR').format(Math.round(n || 0))
 
 const AccountCard = memo(function AccountCard({ account, onPress }) {
   const { colors } = useTheme()
@@ -62,6 +65,7 @@ export default function HomeScreen({ navigation }) {
     [navigation]
   )
   const openTx = useCallback((tx) => navigation.navigate('TransactionForm', { id: tx.id }), [navigation])
+  const openForm = useCallback(() => navigation.navigate('TransactionForm'), [navigation])
   const renderAccount = useCallback(
     ({ item }) => <AccountCard account={item} onPress={openAccount} />,
     [openAccount]
@@ -99,18 +103,11 @@ export default function HomeScreen({ navigation }) {
         <Text style={{ fontFamily: fonts.medium, fontSize: 13, color: colors.primaryInk, opacity: 0.72 }}>
           Solde global
         </Text>
-        <Text style={{ fontFamily: fonts.extrabold, fontSize: 32, color: colors.primaryInk }}>
-          {fmt(summary.total)}
-        </Text>
-        <View style={{ flexDirection: 'row', gap: 18, marginTop: 6 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-            <Ionicons name="phone-portrait-outline" size={13} color={colors.primaryInk} />
-            <Text style={[styles.heroSub, { color: colors.primaryInk }]}>{fmt(summary.total_electronic)}</Text>
-          </View>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-            <Ionicons name="cash-outline" size={13} color={colors.primaryInk} />
-            <Text style={[styles.heroSub, { color: colors.primaryInk }]}>{fmt(summary.total_physical)}</Text>
-          </View>
+        <View style={styles.heroAmountRow}>
+          <Text style={{ fontFamily: fonts.extrabold, fontSize: 42, color: colors.primaryInk }}>
+            {fmtNumber(summary.total)}
+          </Text>
+          <Text style={[styles.heroCurrency, { color: colors.primaryInk }]}>FCFA</Text>
         </View>
       </View>
 
@@ -166,9 +163,21 @@ export default function HomeScreen({ navigation }) {
             <EmptyState text="Aucune transaction pour le moment." />
           </Card>
         }
-        contentContainerStyle={{ paddingBottom: 28 }}
+        contentContainerStyle={{ paddingBottom: 110 }}
         refreshControl={<RefreshControl refreshing={false} onRefresh={refresh} />}
       />
+
+      {/* Floating add button */}
+      <Pressable
+        onPress={openForm}
+        style={({ pressed }) => [
+          styles.fab,
+          shadowOverlay,
+          { backgroundColor: pressed ? colors.primary600 : colors.primary },
+        ]}
+      >
+        <Ionicons name="add" size={30} color={colors.primaryInk} />
+      </Pressable>
     </SafeAreaView>
   )
 }
@@ -185,10 +194,16 @@ const styles = StyleSheet.create({
     padding: 20,
     gap: 2,
   },
-  heroSub: {
+  heroAmountRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 6,
+  },
+  heroCurrency: {
     fontFamily: fonts.semibold,
-    fontSize: 12,
-    opacity: 0.8,
+    fontSize: 13,
+    opacity: 0.6,
+    paddingBottom: 8,
   },
   accountCard: {
     width: 170,
@@ -224,6 +239,16 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: radius.lg,
     borderBottomRightRadius: radius.lg,
     borderBottomWidth: 1,
+  },
+  fab: {
+    position: 'absolute',
+    right: 20,
+    bottom: 24,
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 })
