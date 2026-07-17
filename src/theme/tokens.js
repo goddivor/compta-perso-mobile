@@ -29,6 +29,12 @@ export const palettes = {
     warning: '#F59E0B',
     warningSoft: '#FEF3C7',
     link: '#0B5FFF',
+
+    // Bottom tab bar: inactive items stay PURE ink (no washed-out grey),
+    // the active item is the distinct brand yellow (darkened for contrast
+    // on the light surface).
+    tabActive: '#E6BD00',
+    tabInactive: '#1A1714',
   },
   dark: {
     bg: '#161311',
@@ -51,6 +57,10 @@ export const palettes = {
     warning: '#F59E0B',
     warningSoft: '#3A2E14',
     link: '#0B5FFF',
+
+    // Bottom tab bar: inactive items in PURE white, active in brand yellow
+    tabActive: '#FFD200',
+    tabInactive: '#FFFFFF',
   },
 }
 
