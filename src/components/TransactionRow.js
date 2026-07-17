@@ -1,21 +1,27 @@
 // One transaction line: description/category, account, signed colored amount,
 // and a swap icon when the transaction is part of a transfer pair.
+// Memoized: parents pass STABLE onPress/onLongPress callbacks that receive
+// the transaction, so list re-renders skip unchanged rows.
+import { memo, useCallback } from 'react'
 import { View, Text, Pressable, StyleSheet } from 'react-native'
 import Ionicons from '@expo/vector-icons/Ionicons'
 import { useTheme, fonts } from '../theme/tokens'
 import { fmt, fmtSigned } from '../utils/format'
 import { Badge, Dot } from './ui'
 
-export function TransactionRow({ tx, onPress, onLongPress, showDate }) {
+export const TransactionRow = memo(function TransactionRow({ tx, onPress, onLongPress, showDate }) {
   const { colors } = useTheme()
   const isCredit = tx.type === 'CREDIT'
   const amountColor = isCredit ? colors.success : colors.danger
   const title = tx.description || tx.category_name || (tx.transfer_pair_id ? 'Transfert' : isCredit ? 'Entrée' : 'Dépense')
 
+  const handlePress = useCallback(() => onPress?.(tx), [onPress, tx])
+  const handleLongPress = useCallback(() => onLongPress?.(tx), [onLongPress, tx])
+
   return (
     <Pressable
-      onPress={onPress}
-      onLongPress={onLongPress}
+      onPress={handlePress}
+      onLongPress={onLongPress ? handleLongPress : undefined}
       delayLongPress={350}
       style={({ pressed }) => [styles.row, pressed && { backgroundColor: colors.surface2 }]}
     >
@@ -53,7 +59,7 @@ export function TransactionRow({ tx, onPress, onLongPress, showDate }) {
       </View>
     </Pressable>
   )
-}
+})
 
 const styles = StyleSheet.create({
   row: {
