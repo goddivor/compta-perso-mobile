@@ -1,7 +1,11 @@
 // Goodness design tokens — mobile port of goodmarket/src/styles/tokens.css
-// Two palettes (light/dark) following the system color scheme.
+// Two palettes (light/dark). The active scheme follows the system theme by
+// default, but the user can force light or dark from the Settings screen
+// (persisted in AsyncStorage, applied immediately via ThemeProvider).
 // The primary yellow is CONSTANT across themes (brand signature).
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { useColorScheme } from 'react-native'
+import AsyncStorage from '@react-native-async-storage/async-storage'
 
 export const palettes = {
   light: {
@@ -77,8 +81,50 @@ export const shadowOverlay = {
   elevation: 8,
 }
 
-export function useTheme() {
-  const scheme = useColorScheme()
+/* --------------------------- Theme provider ----------------------------- */
+
+const THEME_MODE_KEY = 'theme_mode' // 'system' | 'light' | 'dark'
+const ThemeContext = createContext(null)
+
+function buildTheme(scheme, mode, setMode) {
   const isDark = scheme === 'dark'
-  return { colors: isDark ? palettes.dark : palettes.light, isDark, scheme }
+  return {
+    mode,
+    setMode,
+    scheme,
+    isDark,
+    colors: isDark ? palettes.dark : palettes.light,
+  }
+}
+
+export function ThemeProvider({ children }) {
+  // useColorScheme() can briefly return null on Android — default to light
+  const system = useColorScheme() || 'light'
+  const [mode, setModeState] = useState('system')
+
+  useEffect(() => {
+    AsyncStorage.getItem(THEME_MODE_KEY).then((v) => {
+      if (v === 'light' || v === 'dark' || v === 'system') setModeState(v)
+    })
+  }, [])
+
+  const setMode = useCallback((m) => {
+    setModeState(m)
+    AsyncStorage.setItem(THEME_MODE_KEY, m).catch(() => {})
+  }, [])
+
+  const scheme = mode === 'system' ? system : mode
+  const value = useMemo(() => buildTheme(scheme, mode, setMode), [scheme, mode, setMode])
+
+  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
+}
+
+const noop = () => {}
+
+// Every color in the app must come from here (never hard-coded).
+export function useTheme() {
+  const ctx = useContext(ThemeContext)
+  const system = useColorScheme() || 'light'
+  // Fallback (outside the provider): follow the system
+  return ctx || buildTheme(system, 'system', noop)
 }

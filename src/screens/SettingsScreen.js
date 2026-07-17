@@ -1,19 +1,29 @@
-// Settings: account management, category management and cloud sync
-// (API URL/token config, push/pull with confirmation, last push status).
-import { useCallback, useEffect, useState } from 'react'
+// Settings: appearance (theme mode), account management, category
+// management and cloud sync (API URL/token config, push/pull with
+// confirmation, last push status).
+// Note: this screen stays a ScrollView because it mixes forms and short
+// bounded lists (nesting VirtualizedLists inside a ScrollView is an RN
+// anti-pattern); rows are cheap and data loads after the transition.
+import { useEffect, useState } from 'react'
 import { View, Text, ScrollView, Pressable, Alert, StyleSheet } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { useFocusEffect } from '@react-navigation/native'
 import Ionicons from '@expo/vector-icons/Ionicons'
 import { useTheme, fonts, radius } from '../theme/tokens'
 import { listAccounts, listCategories, deleteAccount, deleteCategory } from '../db/database'
 import { getSyncConfig, saveSyncConfig, syncPush, syncPull, syncStatus } from '../sync/api'
 import { fmt, fmtDateTime } from '../utils/format'
 import { useApp } from '../context/AppContext'
-import { Card, Button, Field, Input, SectionTitle, EmptyState, Dot, Badge } from '../components/ui'
+import { useFocusData } from '../hooks/useFocusData'
+import { Card, Button, Field, Input, Segmented, SectionTitle, EmptyState, Dot, Badge } from '../components/ui'
+
+const THEME_MODES = [
+  { label: 'Système', value: 'system' },
+  { label: 'Clair', value: 'light' },
+  { label: 'Sombre', value: 'dark' },
+]
 
 export default function SettingsScreen({ navigation }) {
-  const { colors } = useTheme()
+  const { colors, mode, setMode } = useTheme()
   const { tick, refresh } = useApp()
   const [accounts, setAccounts] = useState([])
   const [categories, setCategories] = useState([])
@@ -24,12 +34,10 @@ export default function SettingsScreen({ navigation }) {
   const [syncError, setSyncError] = useState('')
   const [busy, setBusy] = useState('')
 
-  const load = useCallback(() => {
+  useFocusData(() => {
     setAccounts(listAccounts())
     setCategories(listCategories())
-  }, [])
-
-  useFocusEffect(useCallback(() => { load() }, [load, tick]))
+  }, [tick])
 
   useEffect(() => {
     getSyncConfig().then(setCfg)
@@ -130,6 +138,17 @@ export default function SettingsScreen({ navigation }) {
         <View style={styles.header}>
           <Text style={{ fontFamily: fonts.extrabold, fontSize: 24, color: colors.ink }}>Réglages</Text>
         </View>
+
+        {/* ----------------------------- Appearance ----------------------- */}
+        <View style={styles.sectionHeader}>
+          <SectionTitle>Apparence</SectionTitle>
+        </View>
+        <Card style={{ marginHorizontal: 20, padding: 16, gap: 8 }}>
+          <Segmented segments={THEME_MODES} value={mode} onChange={setMode} />
+          <Text style={{ fontFamily: fonts.regular, fontSize: 11, color: colors.faint }}>
+            « Système » suit le thème du téléphone.
+          </Text>
+        </Card>
 
         {/* ------------------------------ Accounts ----------------------- */}
         <View style={styles.sectionHeader}>
