@@ -11,6 +11,7 @@ import { getSyncConfig } from '../sync/api'
 import { useTick } from '../context/AppContext'
 import { useFocusData } from '../hooks/useFocusData'
 import { SettingsRow, RowSeparator } from '../components/SettingsRow'
+import { getCurrentVersion } from '../updates/updater'
 
 const MODE_LABELS = { system: 'Système', light: 'Clair', dark: 'Sombre' }
 
@@ -21,6 +22,7 @@ const ICON_COLORS = {
   categories: '#8B5CF6',
   sync: '#16A34A',
   theme: '#F59E0B',
+  about: '#64748B',
 }
 
 function SectionCard({ title, children }) {
@@ -94,6 +96,14 @@ export default function SettingsScreen({ navigation }) {
             title="Thème"
             subtitle={MODE_LABELS[mode] || 'Système'}
             onPress={() => navigation.navigate('ThemeSettings')}
+          />
+          <RowSeparator />
+          <SettingsRow
+            icon="information-circle-outline"
+            iconBg={ICON_COLORS.about}
+            title="À propos"
+            subtitle={`Version ${getCurrentVersion()}`}
+            onPress={() => navigation.navigate('About')}
           />
         </SectionCard>
       </ScrollView>

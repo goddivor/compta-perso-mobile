@@ -36,6 +36,8 @@ import SyncScreen from './src/screens/SyncScreen'
 import ThemeScreen from './src/screens/ThemeScreen'
 import AccountFormScreen from './src/screens/AccountFormScreen'
 import CategoryFormScreen from './src/screens/CategoryFormScreen'
+import AboutScreen from './src/screens/AboutScreen'
+import { checkForUpdateOnStartup } from './src/updates/updater'
 
 const Tab = createBottomTabNavigator()
 const Stack = createNativeStackNavigator()
@@ -162,6 +164,11 @@ function Root() {
           component={CategoryFormScreen}
           options={{ title: 'Catégorie', ...stackHeader }}
         />
+        <Stack.Screen
+          name="About"
+          component={AboutScreen}
+          options={{ title: 'À propos', ...stackHeader }}
+        />
       </Stack.Navigator>
     </NavigationContainer>
   )
@@ -188,6 +195,12 @@ export default function App() {
     } catch (e) {
       setDbError(e.message)
     }
+  }, [])
+
+  // Silent update check (GitHub Releases) shortly after startup
+  useEffect(() => {
+    const timer = setTimeout(() => { checkForUpdateOnStartup() }, 3000)
+    return () => clearTimeout(timer)
   }, [])
 
   if (!fontsLoaded || (!dbReady && !dbError)) {
