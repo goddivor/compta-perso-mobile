@@ -11,6 +11,7 @@
     },
     "android": {
       "package": "com.divor.comptaperso",
+      "permissions": ["REQUEST_INSTALL_PACKAGES"],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",

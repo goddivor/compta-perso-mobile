@@ -7,23 +7,11 @@ import Ionicons from '@expo/vector-icons/Ionicons'
 import { useTheme, fonts, radius } from '../theme/tokens'
 import { useT } from '../i18n'
 import { Button } from '../components/ui'
-import { checkForUpdate, getCurrentVersion } from '../updates/updater'
+import UpdateModal from '../components/UpdateModal'
+import { checkForUpdate, getCurrentVersion, markdownToText } from '../updates/updater'
 
 const WEBSITE_URL = 'https://goddivor.github.io/compta-perso/'
 const GITHUB_URL = 'https://github.com/goddivor/compta-perso-mobile'
-
-// Rough markdown → plain text for the release notes (headings, emphasis,
-// links, list bullets).
-function markdownToText(md) {
-  return String(md || '')
-    .replace(/\r\n/g, '\n')
-    .replace(/^#{1,6}\s*/gm, '')
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-    .replace(/(\*\*|__|`)/g, '')
-    .replace(/^\s*[-*+]\s+/gm, '•  ')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim()
-}
 
 export default function AboutScreen() {
   const { colors } = useTheme()
@@ -36,6 +24,9 @@ export default function AboutScreen() {
 
   // Release notes, loaded once on mount (null = loading, '' = none)
   const [notes, setNotes] = useState(null)
+
+  // In-app download + install sheet (same modal as the startup check)
+  const [showUpdate, setShowUpdate] = useState(false)
 
   useEffect(() => {
     let alive = true
@@ -86,9 +77,9 @@ export default function AboutScreen() {
                   </Text>
                 </View>
                 <Button
-                  title={t('about.download')}
+                  title={t('update.downloadInstall')}
                   icon="download-outline"
-                  onPress={() => openLink(result.apkUrl || result.pageUrl)}
+                  onPress={() => setShowUpdate(true)}
                 />
               </View>
             ) : (
@@ -147,6 +138,13 @@ export default function AboutScreen() {
           </Pressable>
         </View>
       </ScrollView>
+
+      <UpdateModal
+        visible={showUpdate}
+        info={result}
+        onLater={() => setShowUpdate(false)}
+        onClose={() => setShowUpdate(false)}
+      />
     </SafeAreaView>
   )
 }

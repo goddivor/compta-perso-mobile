@@ -2,11 +2,9 @@
 // The app is distributed as an APK attached to each release of
 // goddivor/compta-perso-mobile: we compare the installed version with the
 // latest release tag and offer the APK download link when a newer one exists.
-import { Alert, Linking } from 'react-native'
 import * as Application from 'expo-application'
 import Constants from 'expo-constants'
 import AsyncStorage from '@react-native-async-storage/async-storage'
-import { t } from '../i18n'
 
 const RELEASES_LATEST_URL =
   'https://api.github.com/repos/goddivor/compta-perso-mobile/releases/latest'
@@ -68,29 +66,31 @@ export async function checkForUpdate() {
   }
 }
 
-// Silent check on app startup: shows an Alert only when a newer version
-// exists AND it has not been dismissed before (one alert per version).
-export async function checkForUpdateOnStartup() {
+// Rough markdown → plain text for the release notes (headings, emphasis,
+// links, list bullets).
+export function markdownToText(md) {
+  return String(md || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/^#{1,6}\s*/gm, '')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/(\*\*|__|`)/g, '')
+    .replace(/^\s*[-*+]\s+/gm, '•  ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+// Silent check on app startup: returns the update info only when a newer
+// version exists AND it has not been dismissed before (once per version).
+// The caller shows the in-app UpdateModal (download + install).
+export async function getStartupUpdate() {
   const info = await checkForUpdate()
-  if (!info.available) return
-
+  if (!info.available) return null
   const dismissed = await AsyncStorage.getItem(DISMISSED_KEY).catch(() => null)
-  if (dismissed === info.latest) return
+  if (dismissed === info.latest) return null
+  return info
+}
 
-  const url = info.apkUrl || info.pageUrl
-  Alert.alert(
-    t('updater.title', { v: info.latest }),
-    t('updater.message'),
-    [
-      {
-        text: t('updater.later'),
-        style: 'cancel',
-        onPress: () => AsyncStorage.setItem(DISMISSED_KEY, info.latest).catch(() => {}),
-      },
-      {
-        text: t('updater.download'),
-        onPress: () => Linking.openURL(url).catch(() => {}),
-      },
-    ],
-  )
+// "Later" on the update modal: do not show this version again on startup
+export function dismissUpdateVersion(version) {
+  return AsyncStorage.setItem(DISMISSED_KEY, String(version)).catch(() => {})
 }

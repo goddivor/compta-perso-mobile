@@ -39,7 +39,8 @@ import AccountFormScreen from './src/screens/AccountFormScreen'
 import CategoryFormScreen from './src/screens/CategoryFormScreen'
 import AboutScreen from './src/screens/AboutScreen'
 import LanguageScreen from './src/screens/LanguageScreen'
-import { checkForUpdateOnStartup } from './src/updates/updater'
+import UpdateModal from './src/components/UpdateModal'
+import { getStartupUpdate, dismissUpdateVersion } from './src/updates/updater'
 
 const Tab = createBottomTabNavigator()
 const Stack = createNativeStackNavigator()
@@ -87,6 +88,20 @@ function Tabs() {
 function Root() {
   const { colors, isDark } = useTheme()
   const t = useT()
+
+  // Silent update check (GitHub Releases) shortly after startup: when a
+  // newer, non-dismissed version exists, open the in-app update sheet
+  // (download + install without leaving the app).
+  const [updateInfo, setUpdateInfo] = useState(null)
+  useEffect(() => {
+    let alive = true
+    const timer = setTimeout(() => {
+      getStartupUpdate().then((info) => {
+        if (alive && info) setUpdateInfo(info)
+      })
+    }, 3000)
+    return () => { alive = false; clearTimeout(timer) }
+  }, [])
 
   const navTheme = {
     ...(isDark ? DarkTheme : DefaultTheme),
@@ -179,6 +194,16 @@ function Root() {
           options={{ title: t('nav.about'), ...stackHeader }}
         />
       </Stack.Navigator>
+
+      <UpdateModal
+        visible={!!updateInfo}
+        info={updateInfo}
+        onLater={() => {
+          if (updateInfo) dismissUpdateVersion(updateInfo.latest)
+          setUpdateInfo(null)
+        }}
+        onClose={() => setUpdateInfo(null)}
+      />
     </NavigationContainer>
   )
 }
@@ -204,12 +229,6 @@ export default function App() {
     } catch (e) {
       setDbError(e.message)
     }
-  }, [])
-
-  // Silent update check (GitHub Releases) shortly after startup
-  useEffect(() => {
-    const timer = setTimeout(() => { checkForUpdateOnStartup() }, 3000)
-    return () => clearTimeout(timer)
   }, [])
 
   if (!fontsLoaded || (!dbReady && !dbError)) {
