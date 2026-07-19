@@ -8,17 +8,16 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import Ionicons from '@expo/vector-icons/Ionicons'
 import { useTheme, fonts, radius, shadowCard, shadowOverlay } from '../theme/tokens'
 import { getSummary, listTransactions } from '../db/database'
-import { fmt } from '../utils/format'
+import { fmt, fmtNumber } from '../utils/format'
 import { useApp } from '../context/AppContext'
 import { useFocusData } from '../hooks/useFocusData'
+import { useI18n } from '../i18n'
 import { Card, SectionTitle, EmptyState, Dot } from '../components/ui'
 import { TransactionRow } from '../components/TransactionRow'
 
-// Hero amount without currency suffix (the small "FCFA" is rendered separately)
-const fmtNumber = (n) => new Intl.NumberFormat('fr-FR').format(Math.round(n || 0))
-
 const AccountCard = memo(function AccountCard({ account, onPress }) {
   const { colors } = useTheme()
+  const { t } = useI18n()
   const handlePress = useCallback(() => onPress(account.id), [onPress, account.id])
   return (
     <Pressable onPress={handlePress}>
@@ -31,7 +30,7 @@ const AccountCard = memo(function AccountCard({ account, onPress }) {
             </Text>
           </View>
           <Text style={{ fontFamily: fonts.regular, fontSize: 11, color: colors.muted }}>
-            {account.provider || (account.type === 'ELECTRONIC' ? 'Électronique' : 'Espèces')}
+            {account.provider || (account.type === 'ELECTRONIC' ? t('common.electronic') : t('common.cash'))}
           </Text>
           <Text
             style={{
@@ -51,6 +50,7 @@ const AccountCard = memo(function AccountCard({ account, onPress }) {
 
 export default function HomeScreen({ navigation }) {
   const { colors } = useTheme()
+  const { t, locale } = useI18n()
   const { tick, refresh } = useApp()
   const [summary, setSummary] = useState({ total: 0, total_electronic: 0, total_physical: 0, accounts: [] })
   const [latest, setLatest] = useState([])
@@ -92,16 +92,16 @@ export default function HomeScreen({ navigation }) {
   const header = (
     <>
       <View style={styles.header}>
-        <Text style={{ fontFamily: fonts.extrabold, fontSize: 24, color: colors.ink }}>Compta Perso</Text>
+        <Text style={{ fontFamily: fonts.extrabold, fontSize: 24, color: colors.ink }}>{t('home.title')}</Text>
         <Text style={{ fontFamily: fonts.regular, fontSize: 12, color: colors.muted }}>
-          {new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}
+          {new Date().toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long' })}
         </Text>
       </View>
 
       {/* Global balance — brand yellow hero card */}
       <View style={[styles.hero, shadowCard, { backgroundColor: colors.primary }]}>
         <Text style={{ fontFamily: fonts.medium, fontSize: 13, color: colors.primaryInk, opacity: 0.72 }}>
-          Solde global
+          {t('home.globalBalance')}
         </Text>
         <View style={styles.heroAmountRow}>
           <Text style={{ fontFamily: fonts.extrabold, fontSize: 42, color: colors.primaryInk }}>
@@ -112,10 +112,10 @@ export default function HomeScreen({ navigation }) {
       </View>
 
       {/* Accounts — horizontal list */}
-      <SectionTitle style={{ marginHorizontal: 20, marginTop: 22, marginBottom: 10 }}>Comptes</SectionTitle>
+      <SectionTitle style={{ marginHorizontal: 20, marginTop: 22, marginBottom: 10 }}>{t('home.accounts')}</SectionTitle>
       {summary.accounts.length === 0 ? (
         <Card style={{ marginHorizontal: 20, paddingVertical: 4 }}>
-          <EmptyState icon="wallet-outline" text={'Aucun compte.\nAjoute ton premier compte dans Réglages.'} />
+          <EmptyState icon="wallet-outline" text={t('home.noAccounts')} />
         </Card>
       ) : (
         <FlatList
@@ -129,7 +129,7 @@ export default function HomeScreen({ navigation }) {
       )}
 
       <View style={styles.latestHeader}>
-        <SectionTitle>Dernières transactions</SectionTitle>
+        <SectionTitle>{t('home.latest')}</SectionTitle>
         <Pressable
           onPress={() => navigation.navigate('TransactionsTab')}
           hitSlop={8}
@@ -160,7 +160,7 @@ export default function HomeScreen({ navigation }) {
         ListHeaderComponent={header}
         ListEmptyComponent={
           <Card style={{ marginHorizontal: 20 }}>
-            <EmptyState text="Aucune transaction pour le moment." />
+            <EmptyState text={t('home.noTransactions')} />
           </Card>
         }
         contentContainerStyle={{ paddingBottom: 110 }}

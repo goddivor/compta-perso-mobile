@@ -8,14 +8,8 @@ import { getDailyReport, listAccounts } from '../db/database'
 import { fmt, fmtDay, today, shiftDay } from '../utils/format'
 import { useTick } from '../context/AppContext'
 import { useFocusData } from '../hooks/useFocusData'
+import { useT } from '../i18n'
 import { Card, Segmented, Select, Field, EmptyState } from '../components/ui'
-
-const PERIODS = [
-  { label: '7 j', value: '7d' },
-  { label: '30 j', value: '30d' },
-  { label: 'Mois', value: 'month' },
-  { label: 'Tout', value: '' },
-]
 
 function periodRange(period) {
   const t = today()
@@ -27,12 +21,13 @@ function periodRange(period) {
 
 const DayRow = memo(function DayRow({ item }) {
   const { colors } = useTheme()
+  const t = useT()
   return (
     <Card style={styles.dayCard}>
       <View style={{ flex: 1, gap: 3 }}>
         <Text style={{ fontFamily: fonts.semibold, fontSize: 13, color: colors.ink }}>{fmtDay(item.day)}</Text>
         <Text style={{ fontFamily: fonts.regular, fontSize: 11, color: colors.muted }}>
-          {item.tx_count} transaction{item.tx_count > 1 ? 's' : ''}
+          {t(item.tx_count > 1 ? 'report.txMany' : 'report.txOne', { n: item.tx_count })}
         </Text>
         <View style={{ flexDirection: 'row', gap: 12, marginTop: 2 }}>
           <Text style={{ fontFamily: fonts.medium, fontSize: 12, color: colors.success }}>+{fmt(item.total_credit)}</Text>
@@ -48,7 +43,14 @@ const DayRow = memo(function DayRow({ item }) {
 
 export default function ReportScreen() {
   const { colors } = useTheme()
+  const t = useT()
   const tick = useTick()
+  const PERIODS = [
+    { label: t('period.7d'), value: '7d' },
+    { label: t('period.30d'), value: '30d' },
+    { label: t('period.month'), value: 'month' },
+    { label: t('period.all'), value: '' },
+  ]
   const [period, setPeriod] = useState('30d')
   const [accountId, setAccountId] = useState('')
   const [accounts, setAccounts] = useState([])
@@ -70,36 +72,36 @@ export default function ReportScreen() {
 
   const accountOptions = useMemo(
     () => [
-      { label: 'Tous les comptes', value: '' },
+      { label: t('report.allAccounts'), value: '' },
       ...accounts.map((a) => ({ label: a.name, value: a.id, color: a.color })),
     ],
-    [accounts]
+    [accounts, t]
   )
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={['top']}>
       <View style={styles.header}>
-        <Text style={{ fontFamily: fonts.extrabold, fontSize: 24, color: colors.ink }}>Rapport</Text>
+        <Text style={{ fontFamily: fonts.extrabold, fontSize: 24, color: colors.ink }}>{t('report.title')}</Text>
       </View>
 
       <View style={{ paddingHorizontal: 20, gap: 12 }}>
         <Segmented segments={PERIODS} value={period} onChange={setPeriod} />
-        <Field label="Compte">
-          <Select value={accountId} onChange={setAccountId} placeholder="Tous les comptes" options={accountOptions} />
+        <Field label={t('report.account')}>
+          <Select value={accountId} onChange={setAccountId} placeholder={t('report.allAccounts')} options={accountOptions} />
         </Field>
 
         {/* Summary band */}
         <View style={{ flexDirection: 'row', gap: 8 }}>
           <Card style={[styles.stat, { backgroundColor: colors.successSoft, borderColor: colors.successSoft }]}>
-            <Text style={[styles.statLabel, { color: colors.success }]}>Entré</Text>
+            <Text style={[styles.statLabel, { color: colors.success }]}>{t('report.in')}</Text>
             <Text style={[styles.statValue, { color: colors.success }]}>{fmt(totals.credit)}</Text>
           </Card>
           <Card style={[styles.stat, { backgroundColor: colors.dangerSoft, borderColor: colors.dangerSoft }]}>
-            <Text style={[styles.statLabel, { color: colors.danger }]}>Sorti</Text>
+            <Text style={[styles.statLabel, { color: colors.danger }]}>{t('report.out')}</Text>
             <Text style={[styles.statValue, { color: colors.danger }]}>{fmt(totals.debit)}</Text>
           </Card>
           <Card style={styles.stat}>
-            <Text style={[styles.statLabel, { color: colors.muted }]}>Net</Text>
+            <Text style={[styles.statLabel, { color: colors.muted }]}>{t('report.net')}</Text>
             <Text style={[styles.statValue, { color: totals.net < 0 ? colors.danger : colors.ink }]}>
               {(totals.net > 0 ? '+' : '') + fmt(totals.net)}
             </Text>
@@ -117,7 +119,7 @@ export default function ReportScreen() {
           keyExtractor={keyExtractor}
           renderItem={renderItem}
           contentContainerStyle={{ padding: 20, gap: 8, paddingBottom: 30 }}
-          ListEmptyComponent={<EmptyState text="Aucune transaction sur la période." />}
+          ListEmptyComponent={<EmptyState text={t('report.empty')} />}
         />
       )}
     </SafeAreaView>

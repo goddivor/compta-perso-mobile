@@ -12,6 +12,7 @@ import {
 } from 'react-native'
 import Ionicons from '@expo/vector-icons/Ionicons'
 import { useTheme, radius, fonts, shadowCard, shadowOverlay } from '../theme/tokens'
+import { useT } from '../i18n'
 
 /* -------------------------------- Card --------------------------------- */
 
@@ -103,10 +104,12 @@ export function Input({ style, multiline, ...props }) {
 
 /* --------------------------- Select (bottom sheet) ---------------------- */
 // options: [{ label, value, color?, sublabel? }]
-export function Select({ value, options, onChange, placeholder = '— Choisir —' }) {
+export function Select({ value, options, onChange, placeholder }) {
   const { colors } = useTheme()
+  const t = useT()
   const [open, setOpen] = useState(false)
   const current = options.find((o) => String(o.value) === String(value))
+  const placeholderLabel = placeholder ?? t('common.choose')
 
   return (
     <>
@@ -120,7 +123,7 @@ export function Select({ value, options, onChange, placeholder = '— Choisir �
             numberOfLines={1}
             style={{ fontFamily: fonts.medium, fontSize: 14, color: current ? colors.ink : colors.faint, flex: 1 }}
           >
-            {current ? current.label : placeholder}
+            {current ? current.label : placeholderLabel}
           </Text>
         </View>
         <Ionicons name="chevron-down" size={16} color={colors.muted} />

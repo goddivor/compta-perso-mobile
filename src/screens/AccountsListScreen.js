@@ -10,10 +10,12 @@ import { listAccounts, deleteAccount } from '../db/database'
 import { fmt } from '../utils/format'
 import { useApp } from '../context/AppContext'
 import { useFocusData } from '../hooks/useFocusData'
+import { useT } from '../i18n'
 import { EmptyState, Dot, Badge } from '../components/ui'
 
 export default function AccountsListScreen({ navigation }) {
   const { colors } = useTheme()
+  const t = useT()
   const { tick, refresh } = useApp()
   const [accounts, setAccounts] = useState([])
 
@@ -22,15 +24,15 @@ export default function AccountsListScreen({ navigation }) {
   const confirmDelete = useCallback(
     (a) => {
       Alert.alert(
-        `Supprimer « ${a.name} »`,
-        'Le compte et TOUTES ses transactions seront supprimés. Continuer ?',
+        t('accounts.deleteTitle', { name: a.name }),
+        t('accounts.deleteMsg'),
         [
-          { text: 'Annuler', style: 'cancel' },
-          { text: 'Supprimer', style: 'destructive', onPress: () => { deleteAccount(a.id); refresh() } },
+          { text: t('common.cancel'), style: 'cancel' },
+          { text: t('common.delete'), style: 'destructive', onPress: () => { deleteAccount(a.id); refresh() } },
         ]
       )
     },
-    [refresh]
+    [refresh, t]
   )
 
   const keyExtractor = useCallback((a) => String(a.id), [])
@@ -56,10 +58,10 @@ export default function AccountsListScreen({ navigation }) {
             <Text style={{ fontFamily: fonts.semibold, fontSize: 14, color: colors.ink }}>{a.name}</Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
               <Text style={{ fontFamily: fonts.regular, fontSize: 11, color: colors.muted }}>
-                {a.provider || (a.type === 'ELECTRONIC' ? 'Électronique' : 'Espèces')}
+                {a.provider || (a.type === 'ELECTRONIC' ? t('common.electronic') : t('common.cash'))}
               </Text>
               {a.fees_rate != null ? (
-                <Badge label={`Frais ${Number((a.fees_rate * 100).toFixed(2))}%`} color={colors.warning} />
+                <Badge label={t('accounts.feesBadge', { pct: Number((a.fees_rate * 100).toFixed(2)) })} color={colors.warning} />
               ) : null}
             </View>
           </View>
@@ -70,7 +72,7 @@ export default function AccountsListScreen({ navigation }) {
         </Pressable>
       </View>
     ),
-    [accounts.length, colors, confirmDelete, navigation]
+    [accounts.length, colors, confirmDelete, navigation, t]
   )
 
   return (
@@ -80,10 +82,10 @@ export default function AccountsListScreen({ navigation }) {
         keyExtractor={keyExtractor}
         renderItem={renderItem}
         contentContainerStyle={{ paddingVertical: 16 }}
-        ListEmptyComponent={<EmptyState icon="wallet-outline" text="Aucun compte. Appuie sur + pour en créer un." />}
+        ListEmptyComponent={<EmptyState icon="wallet-outline" text={t('accounts.empty')} />}
         ListFooterComponent={
           accounts.length ? (
-            <Text style={[styles.hint, { color: colors.faint }]}>Appui long sur un compte pour le supprimer.</Text>
+            <Text style={[styles.hint, { color: colors.faint }]}>{t('accounts.longPressHint')}</Text>
           ) : null
         }
       />

@@ -9,12 +9,14 @@ import { useTheme, fonts, radius } from '../theme/tokens'
 import { listCategories, deleteCategory } from '../db/database'
 import { useApp } from '../context/AppContext'
 import { useFocusData } from '../hooks/useFocusData'
+import { useT } from '../i18n'
 import { EmptyState, Dot } from '../components/ui'
 
-const FLOW_LABELS = { DEBIT: 'Débit', CREDIT: 'Crédit', BOTH: 'Débit et crédit' }
+const FLOW_KEYS = { DEBIT: 'flow.debit', CREDIT: 'flow.credit', BOTH: 'flow.both' }
 
 export default function CategoriesScreen() {
   const { colors } = useTheme()
+  const t = useT()
   const { tick, refresh } = useApp()
   const [categories, setCategories] = useState([])
 
@@ -23,15 +25,15 @@ export default function CategoriesScreen() {
   const confirmDelete = useCallback(
     (c) => {
       Alert.alert(
-        `Supprimer « ${c.name} »`,
-        'Les transactions liées perdront leur catégorie. Continuer ?',
+        t('categories.deleteTitle', { name: c.name }),
+        t('categories.deleteMsg'),
         [
-          { text: 'Annuler', style: 'cancel' },
-          { text: 'Supprimer', style: 'destructive', onPress: () => { deleteCategory(c.id); refresh() } },
+          { text: t('common.cancel'), style: 'cancel' },
+          { text: t('common.delete'), style: 'destructive', onPress: () => { deleteCategory(c.id); refresh() } },
         ]
       )
     },
-    [refresh]
+    [refresh, t]
   )
 
   const keyExtractor = useCallback((c) => String(c.id), [])
@@ -51,7 +53,7 @@ export default function CategoriesScreen() {
           <View style={{ flex: 1, gap: 2 }}>
             <Text style={{ fontFamily: fonts.semibold, fontSize: 14, color: colors.ink }}>{c.name}</Text>
             <Text style={{ fontFamily: fonts.regular, fontSize: 11, color: colors.muted }}>
-              {FLOW_LABELS[c.flow] || c.flow}
+              {FLOW_KEYS[c.flow] ? t(FLOW_KEYS[c.flow]) : c.flow}
             </Text>
           </View>
           <Pressable
@@ -64,7 +66,7 @@ export default function CategoriesScreen() {
         </View>
       </View>
     ),
-    [categories.length, colors, confirmDelete]
+    [categories.length, colors, confirmDelete, t]
   )
 
   return (
@@ -74,7 +76,7 @@ export default function CategoriesScreen() {
         keyExtractor={keyExtractor}
         renderItem={renderItem}
         contentContainerStyle={{ paddingVertical: 16 }}
-        ListEmptyComponent={<EmptyState icon="pricetags-outline" text="Aucune catégorie. Appuie sur + pour en créer une." />}
+        ListEmptyComponent={<EmptyState icon="pricetags-outline" text={t('categories.empty')} />}
       />
     </SafeAreaView>
   )

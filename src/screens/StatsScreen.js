@@ -8,17 +8,12 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { LineChart, PieChart, BarChart } from 'react-native-gifted-charts'
 import { useTheme, fonts } from '../theme/tokens'
 import { listAccounts, getBalanceHistory, getExpensesByCategory, getMonthlyFlow } from '../db/database'
-import { fmt, today, shiftDay } from '../utils/format'
+import { fmt, today, shiftDay, monthShortLabel } from '../utils/format'
 import { useTick } from '../context/AppContext'
 import { useFocusData } from '../hooks/useFocusData'
+import { useT } from '../i18n'
 import { Card, Segmented, SectionTitle, EmptyState, Dot } from '../components/ui'
 import { FilterChip } from '../components/FilterChip'
-
-const PERIODS = [
-  { label: '7 j', value: '7d' },
-  { label: '30 j', value: '30d' },
-  { label: 'Tout', value: '' },
-]
 
 function periodFrom(period) {
   const t = today()
@@ -35,12 +30,6 @@ function compact(n) {
   return String(Math.round(n))
 }
 
-const MONTH_SHORT = ['janv', 'févr', 'mars', 'avr', 'mai', 'juin', 'juil', 'août', 'sept', 'oct', 'nov', 'déc']
-function monthLabel(ym) {
-  const [y, m] = ym.split('-')
-  return `${MONTH_SHORT[Number(m) - 1]} ${y.slice(2)}`
-}
-
 function dayLabel(iso) {
   if (!iso) return ''
   const [, m, d] = iso.split('-')
@@ -49,7 +38,13 @@ function dayLabel(iso) {
 
 export default function StatsScreen() {
   const { colors } = useTheme()
+  const t = useT()
   const tick = useTick()
+  const PERIODS = [
+    { label: t('period.7d'), value: '7d' },
+    { label: t('period.30d'), value: '30d' },
+    { label: t('period.all'), value: '' },
+  ]
   const { width: winW } = useWindowDimensions()
   // screen padding 20×2 + card padding 16×2
   const chartW = winW - 40 - 32
@@ -102,7 +97,7 @@ export default function StatsScreen() {
         value: m.income,
         frontColor: colors.success,
         spacing: 2,
-        label: monthLabel(m.month),
+        label: monthShortLabel(m.month),
         labelWidth: 44,
         labelTextStyle: { color: colors.muted, fontSize: 9, fontFamily: fonts.regular },
       })
@@ -126,7 +121,7 @@ export default function StatsScreen() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={['top']}>
       <View style={styles.header}>
-        <Text style={{ fontFamily: fonts.extrabold, fontSize: 24, color: colors.ink }}>Stats</Text>
+        <Text style={{ fontFamily: fonts.extrabold, fontSize: 24, color: colors.ink }}>{t('stats.title')}</Text>
       </View>
 
       {loading ? (
@@ -138,9 +133,9 @@ export default function StatsScreen() {
           {/* ------------------- Balance history ------------------- */}
           <Card style={styles.card}>
             <View style={styles.cardHeader}>
-              <SectionTitle style={{ fontSize: 16 }}>Évolution du solde</SectionTitle>
+              <SectionTitle style={{ fontSize: 16 }}>{t('stats.balanceHistory')}</SectionTitle>
               <FilterChip
-                label={account?.name || 'Compte'}
+                label={account?.name || t('stats.account')}
                 active={!!account}
                 value={accountId ?? ''}
                 onChange={(v) => setAccountId(v)}
@@ -148,7 +143,7 @@ export default function StatsScreen() {
               />
             </View>
             {lineData.length < 2 ? (
-              <EmptyState icon="trending-up-outline" text="Pas assez de données pour tracer la courbe." />
+              <EmptyState icon="trending-up-outline" text={t('stats.notEnoughData')} />
             ) : (
               <LineChart
                 data={lineData}
@@ -173,7 +168,7 @@ export default function StatsScreen() {
             )}
             {account ? (
               <Text style={{ fontFamily: fonts.medium, fontSize: 12, color: colors.muted }}>
-                Solde actuel : <Text style={{ fontFamily: fonts.bold, color: colors.ink }}>{fmt(account.current_balance)}</Text>
+                {t('stats.currentBalance')}<Text style={{ fontFamily: fonts.bold, color: colors.ink }}>{fmt(account.current_balance)}</Text>
               </Text>
             ) : null}
           </Card>
@@ -181,11 +176,11 @@ export default function StatsScreen() {
           {/* ---------------- Expenses by category ----------------- */}
           <Card style={styles.card}>
             <View style={styles.cardHeader}>
-              <SectionTitle style={{ fontSize: 16 }}>Dépenses par catégorie</SectionTitle>
+              <SectionTitle style={{ fontSize: 16 }}>{t('stats.expensesByCategory')}</SectionTitle>
             </View>
             <Segmented segments={PERIODS} value={period} onChange={setPeriod} />
             {pieData.length === 0 ? (
-              <EmptyState icon="pie-chart-outline" text="Aucune dépense sur la période." />
+              <EmptyState icon="pie-chart-outline" text={t('stats.noExpenses')} />
             ) : (
               <>
                 <View style={{ alignItems: 'center', marginVertical: 6 }}>
@@ -199,7 +194,7 @@ export default function StatsScreen() {
                     strokeColor={colors.surface}
                     centerLabelComponent={() => (
                       <View style={{ alignItems: 'center' }}>
-                        <Text style={{ fontFamily: fonts.regular, fontSize: 10, color: colors.muted }}>Total</Text>
+                        <Text style={{ fontFamily: fonts.regular, fontSize: 10, color: colors.muted }}>{t('stats.total')}</Text>
                         <Text style={{ fontFamily: fonts.bold, fontSize: 13, color: colors.ink }}>
                           {fmt(totalExpenses)}
                         </Text>
@@ -230,20 +225,20 @@ export default function StatsScreen() {
           {/* ------------------ Monthly income/expenses ------------------ */}
           <Card style={styles.card}>
             <View style={styles.cardHeader}>
-              <SectionTitle style={{ fontSize: 16 }}>Entrées / Sorties par mois</SectionTitle>
+              <SectionTitle style={{ fontSize: 16 }}>{t('stats.monthlyFlow')}</SectionTitle>
             </View>
             {shownMonths.length === 0 ? (
-              <EmptyState icon="bar-chart-outline" text="Aucune transaction pour le moment." />
+              <EmptyState icon="bar-chart-outline" text={t('stats.noTransactions')} />
             ) : (
               <>
                 <View style={{ flexDirection: 'row', gap: 16, marginBottom: 4 }}>
                   <View style={styles.legendRow}>
                     <Dot color={colors.success} size={9} />
-                    <Text style={{ fontFamily: fonts.medium, fontSize: 11, color: colors.muted }}>Entrées</Text>
+                    <Text style={{ fontFamily: fonts.medium, fontSize: 11, color: colors.muted }}>{t('stats.income')}</Text>
                   </View>
                   <View style={styles.legendRow}>
                     <Dot color={colors.danger} size={9} />
-                    <Text style={{ fontFamily: fonts.medium, fontSize: 11, color: colors.muted }}>Sorties</Text>
+                    <Text style={{ fontFamily: fonts.medium, fontSize: 11, color: colors.muted }}>{t('stats.expenses')}</Text>
                   </View>
                 </View>
                 <BarChart

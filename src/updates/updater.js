@@ -6,6 +6,7 @@ import { Alert, Linking } from 'react-native'
 import * as Application from 'expo-application'
 import Constants from 'expo-constants'
 import AsyncStorage from '@react-native-async-storage/async-storage'
+import { t } from '../i18n'
 
 const RELEASES_LATEST_URL =
   'https://api.github.com/repos/goddivor/compta-perso-mobile/releases/latest'
@@ -78,16 +79,16 @@ export async function checkForUpdateOnStartup() {
 
   const url = info.apkUrl || info.pageUrl
   Alert.alert(
-    `Mise à jour disponible (v${info.latest})`,
-    'Une nouvelle version de Compta Perso est disponible. Voulez-vous la télécharger ?',
+    t('updater.title', { v: info.latest }),
+    t('updater.message'),
     [
       {
-        text: 'Plus tard',
+        text: t('updater.later'),
         style: 'cancel',
         onPress: () => AsyncStorage.setItem(DISMISSED_KEY, info.latest).catch(() => {}),
       },
       {
-        text: 'Télécharger',
+        text: t('updater.download'),
         onPress: () => Linking.openURL(url).catch(() => {}),
       },
     ],

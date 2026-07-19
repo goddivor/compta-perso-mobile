@@ -11,18 +11,14 @@ import { useTheme, fonts, radius } from '../theme/tokens'
 import { Button, Dot } from '../components/ui'
 import { useFilters, emptyFilters } from '../context/FiltersContext'
 import { listAccounts, listCategories } from '../db/database'
+import { monthName, weekdayInitials } from '../utils/format'
+import { useT } from '../i18n'
 
 /* ----------------------------- Date helpers ----------------------------- */
 
 const pad = (n) => String(n).padStart(2, '0')
 const toISO = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n)
-
-const MONTHS_FR = [
-  'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
-  'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre',
-]
-const WEEKDAYS_FR = ['L', 'M', 'M', 'J', 'V', 'S', 'D'] // Monday first
 
 /* ------------------------------ Small chip ------------------------------ */
 
@@ -105,7 +101,7 @@ function RangeCalendar({ dateFrom, dateTo, onPickDay }) {
           <Ionicons name="chevron-back" size={17} color={colors.ink} />
         </Pressable>
         <Text style={{ fontFamily: fonts.semibold, fontSize: 15, color: colors.ink }}>
-          {MONTHS_FR[cursor.getMonth()]} {cursor.getFullYear()}
+          {monthName(cursor.getMonth())} {cursor.getFullYear()}
         </Text>
         <Pressable
           hitSlop={8}
@@ -118,7 +114,7 @@ function RangeCalendar({ dateFrom, dateTo, onPickDay }) {
 
       {/* Weekday headers, Monday first */}
       <View style={styles.calRow}>
-        {WEEKDAYS_FR.map((w, i) => (
+        {weekdayInitials().map((w, i) => (
           <View key={i} style={styles.calCell}>
             <Text style={{ fontFamily: fonts.medium, fontSize: 12, color: colors.muted }}>{w}</Text>
           </View>
@@ -164,6 +160,7 @@ function RangeCalendar({ dateFrom, dateTo, onPickDay }) {
 
 export default function FilterScreen({ navigation }) {
   const { colors } = useTheme()
+  const t = useT()
   const insets = useSafeAreaInsets()
   const { filters, setFilters } = useFilters()
 
@@ -179,11 +176,11 @@ export default function FilterScreen({ navigation }) {
     const today = new Date()
     const iso = toISO(today)
     return [
-      { key: 'today', label: "Aujourd'hui", from: iso, to: iso },
-      { key: '7d', label: '7 derniers jours', from: toISO(addDays(today, -6)), to: iso },
-      { key: '30d', label: '30 derniers jours', from: toISO(addDays(today, -29)), to: iso },
+      { key: 'today', label: t('filter.today'), from: iso, to: iso },
+      { key: '7d', label: t('filter.last7'), from: toISO(addDays(today, -6)), to: iso },
+      { key: '30d', label: t('filter.last30'), from: toISO(addDays(today, -29)), to: iso },
     ]
-  }, [])
+  }, [t])
 
   /* Previous months ("D'un mois précédent") */
   const monthCards = useMemo(() => {
@@ -194,14 +191,14 @@ export default function FilterScreen({ navigation }) {
       const last = new Date(now.getFullYear(), now.getMonth() - i + 1, 0)
       cards.push({
         key: toISO(first),
-        month: MONTHS_FR[first.getMonth()],
+        month: monthName(first.getMonth()),
         year: first.getFullYear(),
         from: toISO(first),
         to: toISO(last),
       })
     }
     return cards
-  }, [])
+  }, [t])
 
   const isPeriod = (from, to) => draft.date_from === from && draft.date_to === to
   const setPeriod = (from, to) =>
@@ -234,12 +231,12 @@ export default function FilterScreen({ navigation }) {
         showsVerticalScrollIndicator={false}
       >
         <Text style={{ fontFamily: fonts.extrabold, fontSize: 28, color: colors.ink, lineHeight: 36 }}>
-          Filtrer l'historique
+          {t('filter.title')}
         </Text>
 
         {/* Quick ranges */}
         <View style={{ gap: 12 }}>
-          <SectionLabel>À partir</SectionLabel>
+          <SectionLabel>{t('filter.from')}</SectionLabel>
           <View style={styles.chipRow}>
             {quickRanges.map((r) => (
               <Chip
@@ -254,7 +251,7 @@ export default function FilterScreen({ navigation }) {
 
         {/* Previous months */}
         <View style={{ gap: 12 }}>
-          <SectionLabel>D'un mois précédent</SectionLabel>
+          <SectionLabel>{t('filter.previousMonth')}</SectionLabel>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10 }}>
             {monthCards.map((m) => {
               const active = isPeriod(m.from, m.to)
@@ -301,13 +298,13 @@ export default function FilterScreen({ navigation }) {
 
         {/* Inline range calendar */}
         <View style={{ gap: 12 }}>
-          <SectionLabel>Sur une période précise</SectionLabel>
+          <SectionLabel>{t('filter.exactPeriod')}</SectionLabel>
           <RangeCalendar dateFrom={draft.date_from} dateTo={draft.date_to} onPickDay={onPickDay} />
         </View>
 
         {/* Account */}
         <View style={{ gap: 12 }}>
-          <SectionLabel>Compte</SectionLabel>
+          <SectionLabel>{t('filter.account')}</SectionLabel>
           <View style={styles.chipRow}>
             {accounts.map((a) => (
               <Chip
@@ -320,7 +317,7 @@ export default function FilterScreen({ navigation }) {
             ))}
             {accounts.length === 0 ? (
               <Text style={{ fontFamily: fonts.regular, fontSize: 13, color: colors.muted }}>
-                Aucun compte
+                {t('filter.noAccount')}
               </Text>
             ) : null}
           </View>
@@ -328,16 +325,16 @@ export default function FilterScreen({ navigation }) {
 
         {/* Type */}
         <View style={{ gap: 12 }}>
-          <SectionLabel>Type</SectionLabel>
+          <SectionLabel>{t('filter.type')}</SectionLabel>
           <View style={styles.chipRow}>
-            <Chip label="Débit" active={draft.type === 'DEBIT'} onPress={() => toggle('type', 'DEBIT')} />
-            <Chip label="Crédit" active={draft.type === 'CREDIT'} onPress={() => toggle('type', 'CREDIT')} />
+            <Chip label={t('filter.debit')} active={draft.type === 'DEBIT'} onPress={() => toggle('type', 'DEBIT')} />
+            <Chip label={t('filter.credit')} active={draft.type === 'CREDIT'} onPress={() => toggle('type', 'CREDIT')} />
           </View>
         </View>
 
         {/* Category */}
         <View style={{ gap: 12 }}>
-          <SectionLabel>Catégorie</SectionLabel>
+          <SectionLabel>{t('filter.category')}</SectionLabel>
           <View style={styles.chipRow}>
             {categories.map((c) => (
               <Chip
@@ -365,11 +362,11 @@ export default function FilterScreen({ navigation }) {
       >
         <Pressable onPress={() => setDraft({ ...emptyFilters })} hitSlop={6} style={{ alignSelf: 'center' }}>
           <Text style={{ fontFamily: fonts.semibold, fontSize: 14, color: colors.muted }}>
-            Réinitialiser
+            {t('common.reset')}
           </Text>
         </Pressable>
         <Button
-          title="Rechercher selon cette période"
+          title={t('filter.apply')}
           onPress={apply}
           style={{ borderRadius: 24, minHeight: 54 }}
         />

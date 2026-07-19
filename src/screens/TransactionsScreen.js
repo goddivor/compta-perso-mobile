@@ -15,6 +15,7 @@ import { fmtDay } from '../utils/format'
 import { useApp } from '../context/AppContext'
 import { useFilters } from '../context/FiltersContext'
 import { useFocusData } from '../hooks/useFocusData'
+import { useT } from '../i18n'
 import { EmptyState } from '../components/ui'
 import { TransactionRow } from '../components/TransactionRow'
 
@@ -28,6 +29,7 @@ function normalize(s) {
 
 export default function TransactionsScreen({ navigation, route }) {
   const { colors } = useTheme()
+  const t = useT()
   const { tick, refresh } = useApp()
   const { filters, setFilters, search, setSearch, activeCount } = useFilters()
   const [txs, setTxs] = useState([])
@@ -90,21 +92,19 @@ export default function TransactionsScreen({ navigation, route }) {
   const confirmDelete = useCallback(
     (tx) => {
       Alert.alert(
-        'Supprimer la transaction',
-        tx.transfer_pair_id
-          ? 'Cette transaction fait partie d’un transfert : les deux écritures seront supprimées. Continuer ?'
-          : 'Cette transaction sera définitivement supprimée. Continuer ?',
+        t('tx.deleteTitle'),
+        tx.transfer_pair_id ? t('tx.deleteTransferMsg') : t('tx.deleteMsg'),
         [
-          { text: 'Annuler', style: 'cancel' },
+          { text: t('common.cancel'), style: 'cancel' },
           {
-            text: 'Supprimer',
+            text: t('common.delete'),
             style: 'destructive',
             onPress: () => { deleteTransaction(tx.id); refresh() },
           },
         ]
       )
     },
-    [refresh]
+    [refresh, t]
   )
 
   const keyExtractor = useCallback((tx) => String(tx.id), [])
@@ -136,7 +136,7 @@ export default function TransactionsScreen({ navigation, route }) {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={['top']}>
       <View style={styles.header}>
-        <Text style={{ fontFamily: fonts.extrabold, fontSize: 24, color: colors.ink }}>Transactions</Text>
+        <Text style={{ fontFamily: fonts.extrabold, fontSize: 24, color: colors.ink }}>{t('tx.title')}</Text>
       </View>
 
       {/* Search bar + filter button */}
@@ -146,7 +146,7 @@ export default function TransactionsScreen({ navigation, route }) {
           <TextInput
             value={input}
             onChangeText={setInput}
-            placeholder="Recherche"
+            placeholder={t('tx.searchPlaceholder')}
             placeholderTextColor={colors.faint}
             style={[styles.searchInput, { color: colors.ink }]}
             returnKeyType="search"
@@ -185,7 +185,7 @@ export default function TransactionsScreen({ navigation, route }) {
           contentContainerStyle={{ paddingBottom: 110 }}
           stickySectionHeadersEnabled={false}
           keyboardShouldPersistTaps="handled"
-          ListEmptyComponent={<EmptyState text="Aucune transaction ne correspond aux filtres." />}
+          ListEmptyComponent={<EmptyState text={t('tx.emptyFiltered')} />}
           renderSectionHeader={renderSectionHeader}
           renderItem={renderItem}
         />

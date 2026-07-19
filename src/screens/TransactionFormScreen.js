@@ -22,13 +22,14 @@ import {
 } from '../db/database'
 import { fmt, today, isValidDay } from '../utils/format'
 import { useRefresh } from '../context/AppContext'
+import { useI18n } from '../i18n'
 import { Field, Input, Select, Segmented, Button, Card } from '../components/ui'
 import DatePickerSheet from '../components/DatePickerSheet'
 
 // Compact long-form day label, e.g. "jeu. 17 juil. 2026"
-const fmtDayShort = (day) =>
+const fmtDayShort = (day, locale) =>
   isValidDay(day)
-    ? new Date(day + 'T00:00:00').toLocaleDateString('fr-FR', {
+    ? new Date(day + 'T00:00:00').toLocaleDateString(locale, {
         weekday: 'short',
         day: 'numeric',
         month: 'short',
@@ -49,6 +50,7 @@ const emptyForm = {
 
 export default function TransactionFormScreen({ navigation, route }) {
   const { colors } = useTheme()
+  const { t, locale } = useI18n()
   const refresh = useRefresh()
   const txId = route.params?.id ?? null
 
@@ -131,10 +133,10 @@ export default function TransactionFormScreen({ navigation, route }) {
 
   const categoryOptions = useMemo(
     () => [
-      { label: '— Sans catégorie —', value: '' },
+      { label: t('form.noCategory'), value: '' },
       ...categories.map((c) => ({ label: c.name, value: c.id, color: c.color })),
     ],
-    [categories]
+    [categories, t]
   )
 
   const save = () => {
@@ -221,15 +223,15 @@ export default function TransactionFormScreen({ navigation, route }) {
       refresh()
       navigation.goBack()
     } catch (e) {
-      Alert.alert('Erreur', e.message)
+      Alert.alert(t('common.error'), e.message)
     }
   }
 
   const title = wasTransfer
-    ? 'Modifier le transfert'
+    ? t('form.editTransfer')
     : tx
-      ? 'Modifier la transaction'
-      : 'Nouvelle transaction'
+      ? t('form.editTx')
+      : t('form.newTx')
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={['bottom']}>
@@ -237,7 +239,7 @@ export default function TransactionFormScreen({ navigation, route }) {
         <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
           <Text style={{ fontFamily: fonts.bold, fontSize: 20, color: colors.ink, marginBottom: 4 }}>{title}</Text>
 
-          <Field label="Compte">
+          <Field label={t('form.account')}>
             <Select
               value={form.account_id}
               onChange={(v) => set('account_id', v)}
@@ -250,13 +252,13 @@ export default function TransactionFormScreen({ navigation, route }) {
           </Field>
 
           {form.account_id ? (
-            <Field label={form.type === 'CREDIT' ? 'Source (compte)' : 'Destination (compte)'}>
+            <Field label={form.type === 'CREDIT' ? t('form.sourceAccount') : t('form.destAccount')}>
               <Select
                 value={form.linked_account_id}
                 onChange={(v) => set('linked_account_id', v)}
-                placeholder="Externe / Aucune"
+                placeholder={t('form.externalNone')}
                 options={[
-                  { label: 'Externe / Aucune', value: '' },
+                  { label: t('form.externalNone'), value: '' },
                   ...otherAccounts.map((a) => ({
                     label: a.name + (a.provider ? ` (${a.provider})` : ''),
                     value: a.id,
@@ -267,18 +269,18 @@ export default function TransactionFormScreen({ navigation, route }) {
             </Field>
           ) : null}
 
-          <Field label="Type">
+          <Field label={t('form.type')}>
             <Segmented
               value={form.type}
               onChange={(v) => set('type', v)}
               segments={[
-                { label: 'Débit (dépense)', value: 'DEBIT' },
-                { label: 'Crédit (entrée)', value: 'CREDIT' },
+                { label: t('form.debitExpense'), value: 'DEBIT' },
+                { label: t('form.creditIncome'), value: 'CREDIT' },
               ]}
             />
           </Field>
 
-          <Field label="Montant (FCFA)">
+          <Field label={t('form.amount')}>
             <Input
               keyboardType="numeric"
               value={form.amount}
@@ -287,7 +289,7 @@ export default function TransactionFormScreen({ navigation, route }) {
             />
           </Field>
 
-          <Field label={`Frais${isTransfer ? ' de transfert' : ''} (FCFA)`}>
+          <Field label={isTransfer ? t('form.transferFees') : t('form.fees')}>
             <Input
               keyboardType="numeric"
               value={applyFeeRule && feeRate != null ? String(autoFees) : form.fees}
@@ -306,7 +308,7 @@ export default function TransactionFormScreen({ navigation, route }) {
                 thumbColor={applyFeeRule ? colors.primaryInk : colors.surface}
               />
               <Text style={{ flex: 1, fontFamily: fonts.regular, fontSize: 12, color: colors.muted }}>
-                Appliquer la règle de frais{' '}
+                {t('form.applyFeeRule')}
                 <Text style={{ fontFamily: fonts.semibold, color: colors.warning }}>{feeRatePct}%</Text>
                 {baseAmount > 0 ? (
                   <Text style={{ color: colors.faint }}>  → {fmt(autoFees)}</Text>
@@ -317,8 +319,8 @@ export default function TransactionFormScreen({ navigation, route }) {
 
           {feesAmt > 0 && baseAmount > 0 && form.type === 'DEBIT' && !isTransfer ? (
             <Text style={{ fontFamily: fonts.regular, fontSize: 12, color: colors.muted }}>
-              Total débité : <Text style={{ fontFamily: fonts.semibold, color: colors.danger }}>{fmt(totalDebit)}</Text>
-              <Text style={{ color: colors.faint }}> (dont {fmt(feesAmt)} de frais)</Text>
+              {t('form.totalDebited')}<Text style={{ fontFamily: fonts.semibold, color: colors.danger }}>{fmt(totalDebit)}</Text>
+              <Text style={{ color: colors.faint }}>{t('form.inclFeesDetail', { amount: fmt(feesAmt) })}</Text>
             </Text>
           ) : null}
 
@@ -328,33 +330,33 @@ export default function TransactionFormScreen({ navigation, route }) {
               <View style={styles.previewRow}>
                 <Ionicons name="arrow-up-circle-outline" size={16} color={colors.danger} />
                 <Text style={{ flex: 1, fontFamily: fonts.regular, fontSize: 13, color: colors.content }}>
-                  Débit <Text style={{ fontFamily: fonts.semibold, color: fromAccount.color }}>{fromAccount.name}</Text>
+                  {t('form.debit')}<Text style={{ fontFamily: fonts.semibold, color: fromAccount.color }}>{fromAccount.name}</Text>
                 </Text>
                 <Text style={{ fontFamily: fonts.bold, fontSize: 13, color: colors.danger }}>-{fmt(totalDebit)}</Text>
               </View>
               {feesAmt > 0 ? (
                 <Text style={{ fontFamily: fonts.regular, fontSize: 11, color: colors.faint, marginLeft: 24 }}>
-                  dont {fmt(feesAmt)} de frais
+                  {t('form.inclFeesShort', { amount: fmt(feesAmt) })}
                 </Text>
               ) : null}
               <View style={styles.previewRow}>
                 <Ionicons name="arrow-down-circle-outline" size={16} color={colors.success} />
                 <Text style={{ flex: 1, fontFamily: fonts.regular, fontSize: 13, color: colors.content }}>
-                  Crédit <Text style={{ fontFamily: fonts.semibold, color: toAccount.color }}>{toAccount.name}</Text>
+                  {t('form.credit')}<Text style={{ fontFamily: fonts.semibold, color: toAccount.color }}>{toAccount.name}</Text>
                 </Text>
                 <Text style={{ fontFamily: fonts.bold, fontSize: 13, color: colors.success }}>+{fmt(baseAmount)}</Text>
               </View>
             </Card>
           ) : null}
 
-          <Field label="Date">
+          <Field label={t('form.date')}>
             <Pressable
               onPress={() => setDateOpen(true)}
               style={[styles.dateTrigger, { backgroundColor: colors.surface, borderColor: colors.line }]}
             >
               <Ionicons name="calendar-outline" size={17} color={colors.muted} />
               <Text style={{ flex: 1, fontFamily: fonts.medium, fontSize: 14, color: colors.ink }}>
-                {fmtDayShort(form.date)}
+                {fmtDayShort(form.date, locale)}
               </Text>
               <Ionicons name="chevron-down" size={16} color={colors.muted} />
             </Pressable>
@@ -367,18 +369,18 @@ export default function TransactionFormScreen({ navigation, route }) {
             onSelect={(d) => { set('date', d); setDateOpen(false) }}
           />
 
-          <Field label="Catégorie">
-            <Select value={form.category_id} onChange={(v) => set('category_id', v)} options={categoryOptions} placeholder="— Sans catégorie —" />
+          <Field label={t('form.category')}>
+            <Select value={form.category_id} onChange={(v) => set('category_id', v)} options={categoryOptions} placeholder={t('form.noCategory')} />
           </Field>
 
-          <Field label="Description">
-            <Input multiline value={form.description} onChangeText={(v) => set('description', v)} placeholder="Optionnel…" />
+          <Field label={t('form.description')}>
+            <Input multiline value={form.description} onChangeText={(v) => set('description', v)} placeholder={t('form.optional')} />
           </Field>
 
           <View style={{ flexDirection: 'row', gap: 10, marginTop: 8 }}>
-            <Button title="Annuler" variant="secondary" onPress={() => navigation.goBack()} style={{ flex: 1 }} />
+            <Button title={t('common.cancel')} variant="secondary" onPress={() => navigation.goBack()} style={{ flex: 1 }} />
             <Button
-              title={isTransfer ? (tx ? 'Modifier le transfert' : 'Créer le transfert') : 'Enregistrer'}
+              title={isTransfer ? (tx ? t('form.editTransfer') : t('form.createTransfer')) : t('common.save')}
               onPress={save}
               disabled={!valid}
               style={{ flex: 1.4 }}

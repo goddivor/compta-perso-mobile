@@ -5,6 +5,7 @@ import { View, Text, ScrollView, Pressable, ActivityIndicator, Linking, StyleShe
 import { SafeAreaView } from 'react-native-safe-area-context'
 import Ionicons from '@expo/vector-icons/Ionicons'
 import { useTheme, fonts, radius } from '../theme/tokens'
+import { useT } from '../i18n'
 import { Button } from '../components/ui'
 import { checkForUpdate, getCurrentVersion } from '../updates/updater'
 
@@ -26,6 +27,7 @@ function markdownToText(md) {
 
 export default function AboutScreen() {
   const { colors } = useTheme()
+  const t = useT()
   const version = getCurrentVersion()
 
   // Manual check: idle | checking | done (result) | error
@@ -63,28 +65,28 @@ export default function AboutScreen() {
           </View>
           <Text style={{ fontFamily: fonts.extrabold, fontSize: 20, color: colors.ink }}>Compta Perso</Text>
           <Text style={{ fontFamily: fonts.regular, fontSize: 13, color: colors.muted }}>
-            Version {version}
+            {t('about.version', { v: version })}
           </Text>
         </View>
 
         {/* Manual update check */}
         <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.line }]}>
-          <Text style={[styles.cardTitle, { color: colors.ink }]}>Mises à jour</Text>
+          <Text style={[styles.cardTitle, { color: colors.ink }]}>{t('about.updates')}</Text>
           {result ? (
             result.latest == null ? (
               <Text style={{ fontFamily: fonts.regular, fontSize: 13, color: colors.muted }}>
-                Vérification impossible. Vérifiez votre connexion internet.
+                {t('about.checkFailed')}
               </Text>
             ) : result.available ? (
               <View style={{ gap: 12 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                   <Ionicons name="arrow-up-circle" size={20} color={colors.tabActive} />
                   <Text style={{ fontFamily: fonts.semibold, fontSize: 14, color: colors.ink, flex: 1 }}>
-                    Version {result.latest} disponible
+                    {t('about.versionAvailable', { v: result.latest })}
                   </Text>
                 </View>
                 <Button
-                  title="Télécharger"
+                  title={t('about.download')}
                   icon="download-outline"
                   onPress={() => openLink(result.apkUrl || result.pageUrl)}
                 />
@@ -93,13 +95,13 @@ export default function AboutScreen() {
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Ionicons name="checkmark-circle" size={20} color={colors.success} />
                 <Text style={{ fontFamily: fonts.medium, fontSize: 14, color: colors.ink }}>
-                  Vous êtes à jour
+                  {t('about.upToDate')}
                 </Text>
               </View>
             )
           ) : null}
           <Button
-            title="Vérifier les mises à jour"
+            title={t('about.check')}
             variant="secondary"
             icon="refresh-outline"
             loading={checking}
@@ -109,12 +111,12 @@ export default function AboutScreen() {
 
         {/* Latest release notes */}
         <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.line }]}>
-          <Text style={[styles.cardTitle, { color: colors.ink }]}>Nouveautés</Text>
+          <Text style={[styles.cardTitle, { color: colors.ink }]}>{t('about.whatsNew')}</Text>
           {notes === null ? (
             <ActivityIndicator size="small" color={colors.primary600} style={{ alignSelf: 'flex-start' }} />
           ) : notes === '' ? (
             <Text style={{ fontFamily: fonts.regular, fontSize: 13, color: colors.muted }}>
-              Aucune note de version disponible pour le moment.
+              {t('about.noNotes')}
             </Text>
           ) : (
             <Text style={{ fontFamily: fonts.regular, fontSize: 13, lineHeight: 21, color: colors.content }}>

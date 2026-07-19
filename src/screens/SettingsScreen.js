@@ -7,13 +7,12 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useIsFocused } from '@react-navigation/native'
 import { useTheme, fonts, radius } from '../theme/tokens'
 import { listAccounts, listCategories } from '../db/database'
-import { getSyncConfig } from '../sync/api'
+import { getSyncConfig, isConfigured } from '../sync/api'
 import { useTick } from '../context/AppContext'
 import { useFocusData } from '../hooks/useFocusData'
+import { useI18n } from '../i18n'
 import { SettingsRow, RowSeparator } from '../components/SettingsRow'
 import { getCurrentVersion } from '../updates/updater'
-
-const MODE_LABELS = { system: 'Système', light: 'Clair', dark: 'Sombre' }
 
 // Solid icon colors (WhatsApp style: colored circle + white pictogram),
 // identical in light and dark
@@ -22,6 +21,7 @@ const ICON_COLORS = {
   categories: '#8B5CF6',
   sync: '#16A34A',
   theme: '#F59E0B',
+  language: '#0EA5E9',
   about: '#64748B',
 }
 
@@ -37,6 +37,7 @@ function SectionCard({ title, children }) {
 
 export default function SettingsScreen({ navigation }) {
   const { colors, mode } = useTheme()
+  const { t, language } = useI18n()
   const tick = useTick()
   const isFocused = useIsFocused()
   const [counts, setCounts] = useState({ accounts: 0, categories: 0 })
@@ -51,41 +52,41 @@ export default function SettingsScreen({ navigation }) {
   }, [isFocused])
 
   const syncSubtitle = syncCfg
-    ? syncCfg.api_url && syncCfg.token
-      ? syncCfg.api_url.replace(/^https?:\/\//, '')
-      : 'Non configurée'
+    ? isConfigured(syncCfg)
+      ? t('settings.syncConfigured')
+      : t('settings.syncNotConfigured')
     : '…'
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingBottom: 40, gap: 18 }}>
         <View style={styles.header}>
-          <Text style={{ fontFamily: fonts.extrabold, fontSize: 24, color: colors.ink }}>Réglages</Text>
+          <Text style={{ fontFamily: fonts.extrabold, fontSize: 24, color: colors.ink }}>{t('settings.title')}</Text>
         </View>
 
-        <SectionCard title="Données">
+        <SectionCard title={t('settings.sectionData')}>
           <SettingsRow
             icon="wallet-outline"
             iconBg={ICON_COLORS.accounts}
-            title="Comptes"
-            subtitle={`${counts.accounts} compte${counts.accounts > 1 ? 's' : ''}`}
+            title={t('settings.accounts')}
+            subtitle={t(counts.accounts > 1 ? 'settings.accountsMany' : 'settings.accountsOne', { n: counts.accounts })}
             onPress={() => navigation.navigate('AccountsList')}
           />
           <RowSeparator />
           <SettingsRow
             icon="pricetags-outline"
             iconBg={ICON_COLORS.categories}
-            title="Catégories"
-            subtitle={`${counts.categories} catégorie${counts.categories > 1 ? 's' : ''}`}
+            title={t('settings.categories')}
+            subtitle={t(counts.categories > 1 ? 'settings.categoriesMany' : 'settings.categoriesOne', { n: counts.categories })}
             onPress={() => navigation.navigate('Categories')}
           />
         </SectionCard>
 
-        <SectionCard title="Application">
+        <SectionCard title={t('settings.sectionApp')}>
           <SettingsRow
             icon="cloud-outline"
             iconBg={ICON_COLORS.sync}
-            title="Synchronisation cloud"
+            title={t('settings.sync')}
             subtitle={syncSubtitle}
             onPress={() => navigation.navigate('Sync')}
           />
@@ -93,16 +94,24 @@ export default function SettingsScreen({ navigation }) {
           <SettingsRow
             icon="contrast-outline"
             iconBg={ICON_COLORS.theme}
-            title="Thème"
-            subtitle={MODE_LABELS[mode] || 'Système'}
+            title={t('settings.theme')}
+            subtitle={t(`theme.${mode}`) || t('theme.system')}
             onPress={() => navigation.navigate('ThemeSettings')}
+          />
+          <RowSeparator />
+          <SettingsRow
+            icon="globe-outline"
+            iconBg={ICON_COLORS.language}
+            title={t('settings.language')}
+            subtitle={t(`language.${language}`)}
+            onPress={() => navigation.navigate('LanguageSettings')}
           />
           <RowSeparator />
           <SettingsRow
             icon="information-circle-outline"
             iconBg={ICON_COLORS.about}
-            title="À propos"
-            subtitle={`Version ${getCurrentVersion()}`}
+            title={t('settings.about')}
+            subtitle={t('settings.version', { v: getCurrentVersion() })}
             onPress={() => navigation.navigate('About')}
           />
         </SectionCard>

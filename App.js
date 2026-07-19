@@ -20,6 +20,7 @@ import {
 } from '@expo-google-fonts/poppins'
 
 import { ThemeProvider, useTheme, fonts, palettes } from './src/theme/tokens'
+import { I18nProvider, useT, t } from './src/i18n'
 import { getDb } from './src/db/database'
 import { AppProvider } from './src/context/AppContext'
 import { FiltersProvider } from './src/context/FiltersContext'
@@ -37,6 +38,7 @@ import ThemeScreen from './src/screens/ThemeScreen'
 import AccountFormScreen from './src/screens/AccountFormScreen'
 import CategoryFormScreen from './src/screens/CategoryFormScreen'
 import AboutScreen from './src/screens/AboutScreen'
+import LanguageScreen from './src/screens/LanguageScreen'
 import { checkForUpdateOnStartup } from './src/updates/updater'
 
 const Tab = createBottomTabNavigator()
@@ -52,6 +54,7 @@ const TAB_ICONS = {
 
 function Tabs() {
   const { colors } = useTheme()
+  const t = useT()
   return (
     <Tab.Navigator
       detachInactiveScreens
@@ -72,17 +75,18 @@ function Tabs() {
         ),
       })}
     >
-      <Tab.Screen name="HomeTab" component={HomeScreen} options={{ title: 'Accueil' }} />
-      <Tab.Screen name="TransactionsTab" component={TransactionsScreen} options={{ title: 'Transactions' }} />
-      <Tab.Screen name="StatsTab" component={StatsScreen} options={{ title: 'Stats' }} />
-      <Tab.Screen name="ReportTab" component={ReportScreen} options={{ title: 'Rapport' }} />
-      <Tab.Screen name="SettingsTab" component={SettingsScreen} options={{ title: 'Réglages' }} />
+      <Tab.Screen name="HomeTab" component={HomeScreen} options={{ title: t('tabs.home') }} />
+      <Tab.Screen name="TransactionsTab" component={TransactionsScreen} options={{ title: t('tabs.transactions') }} />
+      <Tab.Screen name="StatsTab" component={StatsScreen} options={{ title: t('tabs.stats') }} />
+      <Tab.Screen name="ReportTab" component={ReportScreen} options={{ title: t('tabs.report') }} />
+      <Tab.Screen name="SettingsTab" component={SettingsScreen} options={{ title: t('tabs.settings') }} />
     </Tab.Navigator>
   )
 }
 
 function Root() {
   const { colors, isDark } = useTheme()
+  const t = useT()
 
   const navTheme = {
     ...(isDark ? DarkTheme : DefaultTheme),
@@ -119,18 +123,18 @@ function Root() {
         <Stack.Screen
           name="TransactionForm"
           component={TransactionFormScreen}
-          options={{ title: 'Transaction', ...stackHeader }}
+          options={{ title: t('nav.transaction'), ...stackHeader }}
         />
         <Stack.Screen
           name="Filter"
           component={FilterScreen}
-          options={{ title: 'Rechercher', presentation: 'modal', ...stackHeader }}
+          options={{ title: t('nav.filter'), presentation: 'modal', ...stackHeader }}
         />
         <Stack.Screen
           name="AccountsList"
           component={AccountsListScreen}
           options={({ navigation }) => ({
-            title: 'Comptes',
+            title: t('nav.accounts'),
             ...stackHeader,
             headerRight: headerAdd(navigation, 'AccountForm'),
           })}
@@ -139,7 +143,7 @@ function Root() {
           name="Categories"
           component={CategoriesScreen}
           options={({ navigation }) => ({
-            title: 'Catégories',
+            title: t('nav.categories'),
             ...stackHeader,
             headerRight: headerAdd(navigation, 'CategoryForm'),
           })}
@@ -147,27 +151,32 @@ function Root() {
         <Stack.Screen
           name="Sync"
           component={SyncScreen}
-          options={{ title: 'Synchronisation cloud', ...stackHeader }}
+          options={{ title: t('nav.sync'), ...stackHeader }}
         />
         <Stack.Screen
           name="ThemeSettings"
           component={ThemeScreen}
-          options={{ title: 'Thème', ...stackHeader }}
+          options={{ title: t('nav.theme'), ...stackHeader }}
+        />
+        <Stack.Screen
+          name="LanguageSettings"
+          component={LanguageScreen}
+          options={{ title: t('nav.language'), ...stackHeader }}
         />
         <Stack.Screen
           name="AccountForm"
           component={AccountFormScreen}
-          options={{ title: 'Compte', ...stackHeader }}
+          options={{ title: t('nav.account'), ...stackHeader }}
         />
         <Stack.Screen
           name="CategoryForm"
           component={CategoryFormScreen}
-          options={{ title: 'Catégorie', ...stackHeader }}
+          options={{ title: t('nav.category'), ...stackHeader }}
         />
         <Stack.Screen
           name="About"
           component={AboutScreen}
-          options={{ title: 'À propos', ...stackHeader }}
+          options={{ title: t('nav.about'), ...stackHeader }}
         />
       </Stack.Navigator>
     </NavigationContainer>
@@ -216,7 +225,7 @@ export default function App() {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 30, backgroundColor: boot.bg }}>
         <Text style={{ color: boot.danger, textAlign: 'center' }}>
-          Erreur base de données : {dbError}
+          {t('app.dbError', { message: dbError })}
         </Text>
       </View>
     )
@@ -225,11 +234,13 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <ThemeProvider>
-        <AppProvider>
-          <FiltersProvider>
-            <Root />
-          </FiltersProvider>
-        </AppProvider>
+        <I18nProvider>
+          <AppProvider>
+            <FiltersProvider>
+              <Root />
+            </FiltersProvider>
+          </AppProvider>
+        </I18nProvider>
       </ThemeProvider>
     </SafeAreaProvider>
   )

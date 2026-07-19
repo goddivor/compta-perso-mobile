@@ -8,13 +8,12 @@ import { useEffect, useState } from 'react'
 import { View, Text, Pressable, Modal, StyleSheet } from 'react-native'
 import Ionicons from '@expo/vector-icons/Ionicons'
 import { useTheme, radius, fonts, shadowOverlay } from '../theme/tokens'
+import { weekdayInitials } from '../utils/format'
+import { useI18n } from '../i18n'
 import { Button } from './ui'
 
 const pad = (x) => String(x).padStart(2, '0')
 const toISO = (y, m, d) => `${y}-${pad(m + 1)}-${pad(d)}`
-
-// Week starts on Monday (fr-FR)
-const WEEKDAYS = ['L', 'M', 'M', 'J', 'V', 'S', 'D']
 
 function parseISO(s) {
   const d = new Date(String(s || '').slice(0, 10) + 'T00:00:00')
@@ -34,6 +33,7 @@ function monthCells(year, month) {
 
 export default function DatePickerSheet({ visible, date, onClose, onSelect }) {
   const { colors } = useTheme()
+  const { t, locale } = useI18n()
   const [pending, setPending] = useState(date)
   const [view, setView] = useState(() => {
     const d = parseISO(date)
@@ -58,7 +58,7 @@ export default function DatePickerSheet({ visible, date, onClose, onSelect }) {
   const now = new Date()
   const todayISO = toISO(now.getFullYear(), now.getMonth(), now.getDate())
 
-  const monthLabel = new Date(view.year, view.month, 1).toLocaleDateString('fr-FR', {
+  const monthLabel = new Date(view.year, view.month, 1).toLocaleDateString(locale, {
     month: 'long',
     year: 'numeric',
   })
@@ -101,7 +101,7 @@ export default function DatePickerSheet({ visible, date, onClose, onSelect }) {
 
           {/* Weekday headers (Monday first) */}
           <View style={styles.grid}>
-            {WEEKDAYS.map((w, i) => (
+            {weekdayInitials().map((w, i) => (
               <View key={i} style={styles.cell}>
                 <Text style={{ fontFamily: fonts.medium, fontSize: 11, color: colors.muted }}>{w}</Text>
               </View>
@@ -145,7 +145,7 @@ export default function DatePickerSheet({ visible, date, onClose, onSelect }) {
             })}
           </View>
 
-          <Button title="Valider" onPress={() => onSelect(pending)} style={{ marginTop: 14 }} />
+          <Button title={t('common.validate')} onPress={() => onSelect(pending)} style={{ marginTop: 14 }} />
         </Pressable>
       </Pressable>
     </Modal>

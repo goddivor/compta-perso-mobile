@@ -6,6 +6,7 @@ import Ionicons from '@expo/vector-icons/Ionicons'
 import { useTheme, fonts } from '../theme/tokens'
 import { createCategory } from '../db/database'
 import { useRefresh } from '../context/AppContext'
+import { useT } from '../i18n'
 import { Field, Input, Segmented, Button } from '../components/ui'
 
 const COLORS = [
@@ -15,6 +16,7 @@ const COLORS = [
 
 export default function CategoryFormScreen({ navigation }) {
   const { colors } = useTheme()
+  const t = useT()
   const refresh = useRefresh()
   const [form, setForm] = useState({ name: '', flow: 'DEBIT', color: COLORS[0] })
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }))
@@ -29,26 +31,26 @@ export default function CategoryFormScreen({ navigation }) {
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={['bottom']}>
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
         <Text style={{ fontFamily: fonts.bold, fontSize: 20, color: colors.ink, marginBottom: 4 }}>
-          Nouvelle catégorie
+          {t('categoryForm.title')}
         </Text>
 
-        <Field label="Nom">
-          <Input value={form.name} onChangeText={(v) => set('name', v)} placeholder="ex : Internet" />
+        <Field label={t('categoryForm.name')}>
+          <Input value={form.name} onChangeText={(v) => set('name', v)} placeholder={t('categoryForm.namePlaceholder')} />
         </Field>
 
-        <Field label="Flux">
+        <Field label={t('categoryForm.flow')}>
           <Segmented
             value={form.flow}
             onChange={(v) => set('flow', v)}
             segments={[
-              { label: 'Débit', value: 'DEBIT' },
-              { label: 'Crédit', value: 'CREDIT' },
-              { label: 'Les deux', value: 'BOTH' },
+              { label: t('flow.debit'), value: 'DEBIT' },
+              { label: t('flow.credit'), value: 'CREDIT' },
+              { label: t('categoryForm.both'), value: 'BOTH' },
             ]}
           />
         </Field>
 
-        <Field label="Couleur">
+        <Field label={t('categoryForm.color')}>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
             {COLORS.map((c) => (
               <Pressable
@@ -67,8 +69,8 @@ export default function CategoryFormScreen({ navigation }) {
         </Field>
 
         <View style={{ flexDirection: 'row', gap: 10, marginTop: 8 }}>
-          <Button title="Annuler" variant="secondary" onPress={() => navigation.goBack()} style={{ flex: 1 }} />
-          <Button title="Enregistrer" onPress={save} disabled={!form.name.trim()} style={{ flex: 1.4 }} />
+          <Button title={t('common.cancel')} variant="secondary" onPress={() => navigation.goBack()} style={{ flex: 1 }} />
+          <Button title={t('common.save')} onPress={save} disabled={!form.name.trim()} style={{ flex: 1.4 }} />
         </View>
       </ScrollView>
     </SafeAreaView>

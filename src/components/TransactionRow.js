@@ -7,13 +7,16 @@ import { View, Text, Pressable, StyleSheet } from 'react-native'
 import Ionicons from '@expo/vector-icons/Ionicons'
 import { useTheme, fonts } from '../theme/tokens'
 import { fmt, fmtSigned } from '../utils/format'
+import { useT } from '../i18n'
 import { Badge, Dot } from './ui'
 
 export const TransactionRow = memo(function TransactionRow({ tx, onPress, onLongPress, showDate }) {
   const { colors } = useTheme()
+  const t = useT()
   const isCredit = tx.type === 'CREDIT'
   const amountColor = isCredit ? colors.success : colors.danger
-  const title = tx.description || tx.category_name || (tx.transfer_pair_id ? 'Transfert' : isCredit ? 'Entrée' : 'Dépense')
+  const title =
+    tx.description || tx.category_name || (tx.transfer_pair_id ? t('tx.transfer') : isCredit ? t('tx.income') : t('tx.expense'))
 
   const handlePress = useCallback(() => onPress?.(tx), [onPress, tx])
   const handleLongPress = useCallback(() => onLongPress?.(tx), [onLongPress, tx])
@@ -53,7 +56,7 @@ export const TransactionRow = memo(function TransactionRow({ tx, onPress, onLong
         </Text>
         {tx.fees > 0 ? (
           <Text style={{ fontFamily: fonts.regular, fontSize: 10, color: colors.faint }}>
-            dont {fmt(tx.fees)} frais
+            {t('tx.inclFees', { amount: fmt(tx.fees) })}
           </Text>
         ) : null}
       </View>
