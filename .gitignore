@@ -38,4 +38,9 @@ yarn-error.*
 
 # generated native folders
 /ios
-/android
+
+# Android build outputs (the android/ folder itself is committed — bare workflow)
+android/app/build/
+android/build/
+android/.gradle/
+android/app/debug.keystore
