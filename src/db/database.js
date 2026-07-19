@@ -189,6 +189,16 @@ export function updateTransaction({ id, account_id, date, type, amount, fees, ca
   `, [account_id, date, type, amount, fees || 0, category_id || null, description || null, id])
 }
 
+// Transaction count per account (quick-filter fan orders accounts by usage)
+export function getAccountTxCounts() {
+  return getDb().getAllSync(`
+    SELECT account_id, COUNT(*) AS n
+    FROM transactions
+    WHERE forecast_session_id IS NULL
+    GROUP BY account_id
+  `)
+}
+
 // Deleting one side of a transfer deletes its partner too
 export function deleteTransaction(id) {
   const d = getDb()
