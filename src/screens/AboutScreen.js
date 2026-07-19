@@ -8,7 +8,13 @@ import { useTheme, fonts, radius } from '../theme/tokens'
 import { useT } from '../i18n'
 import { Button } from '../components/ui'
 import UpdateModal from '../components/UpdateModal'
-import { checkForUpdate, getCurrentVersion, markdownToText } from '../updates/updater'
+import {
+  checkForUpdate,
+  getCachedRelease,
+  releaseInfoFromCache,
+  getCurrentVersion,
+  markdownToText,
+} from '../updates/updater'
 
 const WEBSITE_URL = 'https://goddivor.github.io/compta-perso/'
 const GITHUB_URL = 'https://github.com/goddivor/compta-perso-mobile'
@@ -28,10 +34,21 @@ export default function AboutScreen() {
   // In-app download + install sheet (same modal as the startup check)
   const [showUpdate, setShowUpdate] = useState(false)
 
+  // Release notes come from the persisted cache first (instant, no
+  // network). We only fetch when there is no cache yet; the startup check
+  // and the manual button below keep the cache fresh.
   useEffect(() => {
     let alive = true
-    checkForUpdate().then((info) => {
-      if (alive) setNotes(info.latest ? markdownToText(info.notes) : '')
+    getCachedRelease().then((cache) => {
+      if (!alive) return
+      if (cache) {
+        setNotes(markdownToText(cache.notes))
+        setResult(releaseInfoFromCache(cache))
+      } else {
+        checkForUpdate().then((info) => {
+          if (alive) setNotes(info.latest ? markdownToText(info.notes) : '')
+        })
+      }
     })
     return () => { alive = false }
   }, [])
