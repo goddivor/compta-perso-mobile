@@ -51,6 +51,7 @@ export default {
   'tx.income': 'Income',
   'tx.expense': 'Expense',
   'tx.inclFees': 'incl. {amount} fees',
+  'tx.quickFilterClear': 'Clear account filter',
 
   /* --------------------------- Transaction form -------------------------- */
   'form.editTransfer': 'Edit transfer',
@@ -123,6 +124,14 @@ export default {
   'report.txOne': '{n} transaction',
   'report.txMany': '{n} transactions',
   'report.empty': 'No transactions over the period.',
+  'report.viewList': 'List view',
+  'report.viewGraph': 'Graph view',
+
+  /* -------------------------------- Graph -------------------------------- */
+  'graph.empty': 'No transactions to display for this period.',
+  'graph.recenter': 'Recenter the graph',
+  'graph.initialBalance': 'Initial balance',
+  'graph.noDescription': 'No description',
 
   /* ------------------------------- Settings ------------------------------ */
   'settings.title': 'Settings',

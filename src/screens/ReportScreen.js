@@ -1,15 +1,19 @@
 // Daily report: summary band (total in / total out / net) and per-day list.
+// A header toggle switches between this list and the force-directed
+// transaction graph (PhysicsGraphView).
 // Perf: deferred loading, memoized day rows, stable renderItem.
 import { memo, useCallback, useMemo, useState } from 'react'
-import { View, Text, FlatList, ActivityIndicator, StyleSheet } from 'react-native'
+import { View, Text, FlatList, Pressable, ActivityIndicator, StyleSheet } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { useTheme, fonts } from '../theme/tokens'
+import Ionicons from '@expo/vector-icons/Ionicons'
+import { useTheme, fonts, radius } from '../theme/tokens'
 import { getDailyReport, listAccounts } from '../db/database'
 import { fmt, fmtDay, today, shiftDay } from '../utils/format'
 import { useTick } from '../context/AppContext'
 import { useFocusData } from '../hooks/useFocusData'
 import { useT } from '../i18n'
 import { Card, Segmented, Select, Field, EmptyState } from '../components/ui'
+import PhysicsGraphView from '../graph/PhysicsGraphView'
 
 function periodRange(period) {
   const t = today()
@@ -51,6 +55,7 @@ export default function ReportScreen() {
     { label: t('period.month'), value: 'month' },
     { label: t('period.all'), value: '' },
   ]
+  const [mode, setMode] = useState('list') // 'list' | 'graph'
   const [period, setPeriod] = useState('30d')
   const [accountId, setAccountId] = useState('')
   const [accounts, setAccounts] = useState([])
@@ -82,8 +87,31 @@ export default function ReportScreen() {
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={['top']}>
       <View style={styles.header}>
         <Text style={{ fontFamily: fonts.extrabold, fontSize: 24, color: colors.ink }}>{t('report.title')}</Text>
+        {/* List / graph toggle */}
+        <View style={[styles.toggle, { backgroundColor: colors.surface2, borderColor: colors.line }]}>
+          {[
+            { value: 'list', icon: 'list', label: t('report.viewList') },
+            { value: 'graph', icon: 'git-network', label: t('report.viewGraph') },
+          ].map((seg) => {
+            const active = mode === seg.value
+            return (
+              <Pressable
+                key={seg.value}
+                accessibilityLabel={seg.label}
+                onPress={() => setMode(seg.value)}
+                style={[styles.toggleBtn, active && { backgroundColor: colors.primary }]}
+              >
+                <Ionicons name={seg.icon} size={17} color={active ? colors.primaryInk : colors.content} />
+              </Pressable>
+            )
+          })}
+        </View>
       </View>
 
+      {mode === 'graph' ? (
+        <PhysicsGraphView />
+      ) : (
+      <>
       <View style={{ paddingHorizontal: 20, gap: 12 }}>
         <Segmented segments={PERIODS} value={period} onChange={setPeriod} />
         <Field label={t('report.account')}>
@@ -122,12 +150,35 @@ export default function ReportScreen() {
           ListEmptyComponent={<EmptyState text={t('report.empty')} />}
         />
       )}
+      </>
+      )}
     </SafeAreaView>
   )
 }
 
 const styles = StyleSheet.create({
-  header: { paddingHorizontal: 20, paddingTop: 14, paddingBottom: 12 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 14,
+    paddingBottom: 12,
+  },
+  toggle: {
+    flexDirection: 'row',
+    borderRadius: radius.md,
+    borderWidth: 1,
+    padding: 3,
+    gap: 3,
+  },
+  toggleBtn: {
+    width: 40,
+    height: 32,
+    borderRadius: radius.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   stat: {
     flex: 1,
     paddingVertical: 12,
