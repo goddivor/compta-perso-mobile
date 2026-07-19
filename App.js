@@ -34,6 +34,7 @@ import SettingsScreen from './src/screens/SettingsScreen'
 import AccountsListScreen from './src/screens/AccountsListScreen'
 import CategoriesScreen from './src/screens/CategoriesScreen'
 import SyncScreen from './src/screens/SyncScreen'
+import GoogleBackupScreen from './src/screens/GoogleBackupScreen'
 import ThemeScreen from './src/screens/ThemeScreen'
 import AccountFormScreen from './src/screens/AccountFormScreen'
 import CategoryFormScreen from './src/screens/CategoryFormScreen'
@@ -41,6 +42,7 @@ import AboutScreen from './src/screens/AboutScreen'
 import LanguageScreen from './src/screens/LanguageScreen'
 import UpdateModal from './src/components/UpdateModal'
 import { getStartupUpdate, dismissUpdateVersion } from './src/updates/updater'
+import { maybeAutoBackup } from './src/backup/googleDrive'
 
 const Tab = createBottomTabNavigator()
 const Stack = createNativeStackNavigator()
@@ -101,6 +103,15 @@ function Root() {
       })
     }, 3000)
     return () => { alive = false; clearTimeout(timer) }
+  }, [])
+
+  // Silent Google Drive auto-backup, deferred so it never slows startup:
+  // runs only when an account is connected AND the chosen frequency is due
+  // (open = always; daily/weekly = compared with the last backup date).
+  // Fully silent: offline or expired-session errors are swallowed.
+  useEffect(() => {
+    const timer = setTimeout(() => { maybeAutoBackup() }, 8000)
+    return () => clearTimeout(timer)
   }, [])
 
   const navTheme = {
@@ -167,6 +178,11 @@ function Root() {
           name="Sync"
           component={SyncScreen}
           options={{ title: t('nav.sync'), ...stackHeader }}
+        />
+        <Stack.Screen
+          name="GoogleBackup"
+          component={GoogleBackupScreen}
+          options={{ title: t('nav.googleBackup'), ...stackHeader }}
         />
         <Stack.Screen
           name="ThemeSettings"

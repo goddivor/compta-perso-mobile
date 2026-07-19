@@ -8,6 +8,7 @@ import { useIsFocused } from '@react-navigation/native'
 import { useTheme, fonts, radius } from '../theme/tokens'
 import { listAccounts, listCategories } from '../db/database'
 import { getSyncConfig, isConfigured } from '../sync/api'
+import { getStoredAccount } from '../backup/googleDrive'
 import { useTick } from '../context/AppContext'
 import { useFocusData } from '../hooks/useFocusData'
 import { useI18n } from '../i18n'
@@ -20,6 +21,7 @@ const ICON_COLORS = {
   accounts: '#3B82F6',
   categories: '#8B5CF6',
   sync: '#16A34A',
+  googleBackup: '#EA4335',
   theme: '#F59E0B',
   language: '#0EA5E9',
   about: '#64748B',
@@ -42,13 +44,17 @@ export default function SettingsScreen({ navigation }) {
   const isFocused = useIsFocused()
   const [counts, setCounts] = useState({ accounts: 0, categories: 0 })
   const [syncCfg, setSyncCfg] = useState(null)
+  const [googleAccount, setGoogleAccount] = useState(null)
 
   useFocusData(() => {
     setCounts({ accounts: listAccounts().length, categories: listCategories().length })
   }, [tick])
 
   useEffect(() => {
-    if (isFocused) getSyncConfig().then(setSyncCfg)
+    if (isFocused) {
+      getSyncConfig().then(setSyncCfg)
+      getStoredAccount().then(setGoogleAccount)
+    }
   }, [isFocused])
 
   const syncSubtitle = syncCfg
@@ -89,6 +95,18 @@ export default function SettingsScreen({ navigation }) {
             title={t('settings.sync')}
             subtitle={syncSubtitle}
             onPress={() => navigation.navigate('Sync')}
+          />
+          <RowSeparator />
+          <SettingsRow
+            icon="logo-google"
+            iconBg={ICON_COLORS.googleBackup}
+            title={t('settings.googleBackup')}
+            subtitle={
+              googleAccount?.email
+                ? t('settings.googleConnected', { email: googleAccount.email })
+                : t('settings.googleNotConfigured')
+            }
+            onPress={() => navigation.navigate('GoogleBackup')}
           />
           <RowSeparator />
           <SettingsRow
