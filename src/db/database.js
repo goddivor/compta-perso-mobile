@@ -189,6 +189,21 @@ export function updateTransaction({ id, account_id, date, type, amount, fees, ca
   `, [account_id, date, type, amount, fees || 0, category_id || null, description || null, id])
 }
 
+// Every real transaction, oldest first, no LIMIT (graph view). Slim column
+// set on purpose: the graph resolves accounts itself and only needs the
+// category name for the detail card.
+export function listTransactionsForGraph() {
+  return getDb().getAllSync(`
+    SELECT t.id, t.account_id, t.date, t.type, t.amount, t.fees, t.description,
+           t.transfer_pair_id, t.created_at,
+           c.name AS category_name
+    FROM transactions t
+    LEFT JOIN categories c ON t.category_id = c.id
+    WHERE t.forecast_session_id IS NULL
+    ORDER BY t.date, t.created_at, t.id
+  `)
+}
+
 // Transaction count per account (quick-filter fan orders accounts by usage)
 export function getAccountTxCounts() {
   return getDb().getAllSync(`

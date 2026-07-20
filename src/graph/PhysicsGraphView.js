@@ -1,48 +1,65 @@
 // Transaction graph, "chronological columns" layout (react-native-svg).
 // One vertical column per selected account (ordered by account position,
-// ~220 units apart), headed by an account node. All transactions of the
-// selected accounts are merged and sorted chronologically; each one gets a
-// global row (row height ~90), so time flows downward and every account
-// reads like a queue. Transfer pairs whose two sides are visible share the
-// SAME row and are linked debit -> credit by a primary-yellow arrow across
-// the columns; day changes are marked in the left margin.
-// The canvas stays a free space: pan / pinch-zoom / double-tap with a plain
+// ~220 units apart), headed by an account node. ALL transactions of the
+// selected accounts are merged chronologically; each one gets a global row
+// (row height ~90), so time flows downward and every account reads like a
+// queue. Transfer pairs whose two sides are visible share the SAME row and
+// are linked debit -> credit by a primary-yellow arrow across the columns.
+// The signed amount is drawn INSIDE each node (compact notation when long).
+//
+// The canvas is a free space: pan / pinch-zoom / double-tap with a plain
 // PanResponder (no extra native dependency), recenter button, detail card.
+// Perf: row assignment cached per account selection, and the SVG only
+// renders the rows inside the visible window (± margin), recomputed on
+// gesture release and on a ~150 ms throttle while panning.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { View, Text, Pressable, ScrollView, PanResponder, StyleSheet } from 'react-native'
-import Svg, { G, Line, Path, Rect, Circle, Text as SvgText } from 'react-native-svg'
+import Svg, { G, Line, Path, Circle, Text as SvgText } from 'react-native-svg'
 import Ionicons from '@expo/vector-icons/Ionicons'
 import { useTheme, fonts, radius, shadowOverlay } from '../theme/tokens'
-import { listAccounts, listTransactions } from '../db/database'
-import { fmt, fmtSigned, fmtDate, today, shiftDay } from '../utils/format'
+import { listAccounts, listTransactionsForGraph } from '../db/database'
+import { fmt, fmtSigned, fmtDate } from '../utils/format'
 import { useTick } from '../context/AppContext'
 import { useFocusData } from '../hooks/useFocusData'
 import { useT } from '../i18n'
-import { FilterChip } from '../components/FilterChip'
 import { EmptyState, Dot } from '../components/ui'
 
 const MIN_SCALE = 0.3
 const MAX_SCALE = 4
-const MIN_R = 16
+const MIN_R = 20
 const MAX_R = 34
 const HEADER_R = 24
 
 // Layout constants (graph units)
-const DATE_X = 44 // right edge of the day labels in the left margin
-const COL0_X = 116 // x of the first column
+const COL0_X = 96 // x of the first column
 const COL_SPACING = 220
 const HEADER_Y = 34
 const ROW0_Y = HEADER_Y + 112 // y of the first transaction row
 const ROW_H = 90
 
-const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v))
-const shortDay = (iso) => (iso ? `${String(iso).slice(8, 10)}/${String(iso).slice(5, 7)}` : '')
+// Windowed rendering
+const ROW_MARGIN = 12 // extra rows rendered above/below the viewport
+const RANGE_THROTTLE_MS = 150
 
-function periodFrom(period) {
-  const t = today()
-  if (period === '7d') return shiftDay(t, -6)
-  if (period === '30d') return shiftDay(t, -29)
-  return undefined
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v))
+
+// Compact French amount for in-node display: 850, 12,5k, 1,2M
+function compactAmount(type, n) {
+  const sign = type === 'CREDIT' ? '+' : '-'
+  const abs = Math.abs(Math.round(n || 0))
+  const one = (v) => v.toFixed(1).replace('.0', '').replace('.', ',')
+  if (abs >= 1e6) return `${sign}${one(abs / 1e6)}M`
+  if (abs >= 1e4) return `${sign}${one(abs / 1e3)}k`
+  return `${sign}${abs}`
+}
+
+// Ink on light node colors, white on dark ones (luminance cut)
+function contrastText(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex) || '')
+  if (!m) return '#FFFFFF'
+  const v = parseInt(m[1], 16)
+  const lum = 0.299 * ((v >> 16) & 255) + 0.587 * ((v >> 8) & 255) + 0.114 * (v & 255)
+  return lum > 160 ? '#1A1714' : '#FFFFFF'
 }
 
 // Straight edge trimmed to the node borders + a small arrow head at the target
@@ -74,13 +91,12 @@ export default function PhysicsGraphView() {
   const [accounts, setAccounts] = useState([])
   const [txs, setTxs] = useState([])
   const [selectedIds, setSelectedIds] = useState(null) // null = all accounts
-  const [period, setPeriod] = useState('30d')
   const [selectedId, setSelectedId] = useState(null) // selected node (detail card)
 
   const { loading } = useFocusData(() => {
     setAccounts(listAccounts()) // already ordered by account position
-    setTxs(listTransactions({ date_from: periodFrom(period) }))
-  }, [period, tick])
+    setTxs(listTransactionsForGraph()) // every transaction, oldest first
+  }, [tick])
 
   // Toggle chips: tap an account to show/hide its column, "All" resets
   const toggleAccount = useCallback((id) => {
@@ -94,38 +110,44 @@ export default function PhysicsGraphView() {
 
   /* --------------------- Chronological columns layout --------------------- */
 
+  // Row/node assignment cache: key = sorted selected account ids, cleared
+  // whenever the underlying data reloads (array identity change).
+  const cacheRef = useRef({ accounts: null, txs: null, map: new Map() })
+
   const model = useMemo(() => {
+    const cache = cacheRef.current
+    if (cache.accounts !== accounts || cache.txs !== txs) {
+      cache.accounts = accounts
+      cache.txs = txs
+      cache.map.clear()
+    }
+    const key = selectedIds === null ? 'all' : [...selectedIds].sort((a, b) => a - b).join(',')
+    const hit = cache.map.get(key)
+    if (hit) return hit
+
     const shown = selectedIds === null ? accounts : accounts.filter((a) => selectedIds.includes(a.id))
     const shownIds = new Set(shown.map((a) => a.id))
     const colX = new Map(shown.map((a, i) => [a.id, COL0_X + i * COL_SPACING]))
     const accById = new Map(shown.map((a) => [a.id, a]))
 
+    // txs already come sorted chronologically (date, created_at, id)
     const visibleTxs = txs.filter((tx) => shownIds.has(tx.account_id))
     const txById = new Map(visibleTxs.map((tx) => [tx.id, tx]))
 
-    // Global chronological order (date ASC, created_at ASC)
-    const sorted = [...visibleTxs].sort(
-      (x, y) =>
-        String(x.date).localeCompare(String(y.date)) ||
-        String(x.created_at || '').localeCompare(String(y.created_at || '')) ||
-        x.id - y.id
-    )
-
     // One global row per transaction; a visible transfer pair shares its row
     const rowById = new Map()
-    const rowDays = []
-    for (const tx of sorted) {
+    let rowCount = 0
+    for (const tx of visibleTxs) {
       if (rowById.has(tx.id)) continue
-      const row = rowDays.length
-      rowById.set(tx.id, row)
+      rowById.set(tx.id, rowCount)
       if (tx.transfer_pair_id) {
         const partner = txById.get(tx.transfer_pair_id)
-        if (partner && !rowById.has(partner.id)) rowById.set(partner.id, row)
+        if (partner && !rowById.has(partner.id)) rowById.set(partner.id, rowCount)
       }
-      rowDays.push(String(tx.date).slice(0, 10))
+      rowCount++
     }
 
-    // Node sizes: radius proportional to sqrt(amount), bounded 16..34
+    // Node sizes: radius proportional to sqrt(amount), bounded 20..34
     let maxW = 1
     for (const tx of visibleTxs) if (tx.amount > maxW) maxW = tx.amount
     const sqrtMax = Math.sqrt(maxW) || 1
@@ -142,6 +164,7 @@ export default function PhysicsGraphView() {
         id: `h${a.id}`,
         kind: 'header',
         account: a,
+        row: -1,
         x: colX.get(a.id),
         y: HEADER_Y,
         r: HEADER_R,
@@ -149,57 +172,59 @@ export default function PhysicsGraphView() {
     }
     for (const tx of visibleTxs) {
       const row = rowById.get(tx.id)
-      const partner = tx.transfer_pair_id ? txById.get(tx.transfer_pair_id) : null
       push({
         id: `t${tx.id}`,
         kind: 'tx',
         tx,
         account: accById.get(tx.account_id),
+        row,
         x: colX.get(tx.account_id),
         y: ROW0_Y + row * ROW_H,
         r: clamp(MIN_R + (MAX_R - MIN_R) * (Math.sqrt(tx.amount) / sqrtMax), MIN_R, MAX_R),
         // Transfer whose partner account is hidden: chevron indicator
-        hiddenTransfer: !!tx.transfer_pair_id && !partner,
+        hiddenTransfer: !!tx.transfer_pair_id && !txById.has(tx.transfer_pair_id),
       })
     }
 
-    // Account chain: header -> tx -> tx … down each column
+    // Account chain: header -> tx -> tx … down each column. Edges keep their
+    // endpoint rows so the windowed renderer can cull them cheaply.
     const edges = []
     for (const a of shown) {
       const column = visibleTxs
         .filter((tx) => tx.account_id === a.id)
         .sort((x, y) => rowById.get(x.id) - rowById.get(y.id))
       let prev = `h${a.id}`
+      let prevRow = -1
       for (const tx of column) {
-        edges.push({ from: prev, to: `t${tx.id}`, kind: 'chain', color: a.color })
+        const row = rowById.get(tx.id)
+        edges.push({ from: prev, to: `t${tx.id}`, kind: 'chain', color: a.color, rowMin: prevRow, rowMax: row })
         prev = `t${tx.id}`
+        prevRow = row
       }
     }
     // Transfer links (debit -> credit) across the columns, on a shared row
     for (const tx of visibleTxs) {
       if (!tx.transfer_pair_id || tx.type !== 'DEBIT') continue
       if (txById.has(tx.transfer_pair_id)) {
-        edges.push({ from: `t${tx.id}`, to: `t${tx.transfer_pair_id}`, kind: 'transfer' })
+        const row = rowById.get(tx.id)
+        edges.push({ from: `t${tx.id}`, to: `t${tx.transfer_pair_id}`, kind: 'transfer', rowMin: row, rowMax: row })
       }
     }
-
-    // Day markers in the left margin, one per day change
-    const dayMarkers = []
-    let prevDay = null
-    rowDays.forEach((day, row) => {
-      if (day !== prevDay) {
-        dayMarkers.push({ y: ROW0_Y + row * ROW_H, label: shortDay(day) })
-        prevDay = day
-      }
-    })
 
     const cols = shown.length
-    const bounds = {
-      width: cols > 0 ? COL0_X + (cols - 1) * COL_SPACING + 116 : 0,
-      height: rowDays.length > 0 ? ROW0_Y + rowDays.length * ROW_H : ROW0_Y + 60,
+    const result = {
+      nodes,
+      edges,
+      nodeById,
+      cols,
+      rows: rowCount,
+      bounds: {
+        width: cols > 0 ? COL0_X + (cols - 1) * COL_SPACING + 96 : 0,
+        height: rowCount > 0 ? ROW0_Y + rowCount * ROW_H : ROW0_Y + 60,
+      },
     }
-
-    return { nodes, edges, nodeById, dayMarkers, bounds, cols }
+    cache.map.set(key, result)
+    return result
   }, [accounts, txs, selectedIds])
 
   /* --------------------------- Pan / zoom state --------------------------- */
@@ -214,53 +239,92 @@ export default function PhysicsGraphView() {
   const containerRef = useRef(null)
   const animRef = useRef(null)
 
-  const setViewNow = useCallback((v) => {
-    if (animRef.current) cancelAnimationFrame(animRef.current)
-    setView(v)
+  /* ----------------------- Windowed rendering range ----------------------- */
+
+  const [range, setRange] = useState({ min: -1, max: 40 })
+  const rangeStampRef = useRef(0)
+
+  // Visible row window from the current transform (± ROW_MARGIN rows)
+  const updateRange = useCallback(() => {
+    const v = viewRef.current
+    const { h } = sizeRef.current
+    if (!h || !v.scale) return
+    const yTop = (0 - v.ty) / v.scale
+    const yBottom = (h - v.ty) / v.scale
+    const min = Math.floor((yTop - ROW0_Y) / ROW_H) - ROW_MARGIN
+    const max = Math.ceil((yBottom - ROW0_Y) / ROW_H) + ROW_MARGIN
+    setRange((r) => (r.min === min && r.max === max ? r : { min, max }))
   }, [])
+
+  // Throttled variant used while a gesture/animation is running
+  const scheduleRange = useCallback(() => {
+    const now = Date.now()
+    if (now - rangeStampRef.current >= RANGE_THROTTLE_MS) {
+      rangeStampRef.current = now
+      updateRange()
+    }
+  }, [updateRange])
+
+  const setViewNow = useCallback(
+    (v) => {
+      if (animRef.current) cancelAnimationFrame(animRef.current)
+      setView(v)
+      viewRef.current = v
+      updateRange()
+    },
+    [updateRange]
+  )
 
   // Short eased transition toward a target transform (recenter / double-tap)
-  const animateTo = useCallback((target, duration = 260) => {
-    if (animRef.current) cancelAnimationFrame(animRef.current)
-    const from = { ...viewRef.current }
-    const start = Date.now()
-    const step = () => {
-      const p = Math.min(1, (Date.now() - start) / duration)
-      const e = 1 - Math.pow(1 - p, 3) // ease-out cubic
-      setView({
-        tx: from.tx + (target.tx - from.tx) * e,
-        ty: from.ty + (target.ty - from.ty) * e,
-        scale: from.scale + (target.scale - from.scale) * e,
-      })
-      if (p < 1) animRef.current = requestAnimationFrame(step)
-    }
-    animRef.current = requestAnimationFrame(step)
-  }, [])
+  const animateTo = useCallback(
+    (target, duration = 260) => {
+      if (animRef.current) cancelAnimationFrame(animRef.current)
+      const from = { ...viewRef.current }
+      const start = Date.now()
+      const step = () => {
+        const p = Math.min(1, (Date.now() - start) / duration)
+        const e = 1 - Math.pow(1 - p, 3) // ease-out cubic
+        const next = {
+          tx: from.tx + (target.tx - from.tx) * e,
+          ty: from.ty + (target.ty - from.ty) * e,
+          scale: from.scale + (target.scale - from.scale) * e,
+        }
+        setView(next)
+        viewRef.current = next
+        if (p < 1) {
+          scheduleRange()
+          animRef.current = requestAnimationFrame(step)
+        } else {
+          updateRange()
+        }
+      }
+      animRef.current = requestAnimationFrame(step)
+    },
+    [scheduleRange, updateRange]
+  )
 
-  // Fit the columns in width; a long timeline stays top-aligned (time reads
-  // downward), a short one that fully fits is centered vertically.
-  const fitTransform = useCallback(() => {
-    const { w, h } = sizeRef.current
-    const { width: bw, height: bh } = model.bounds
-    if (!w || !h || !bw) return { tx: 0, ty: 0, scale: 1 }
-    const pad = 40
-    let scale = clamp(w / (bw + pad * 2), MIN_SCALE, 1.25)
-    // If the whole graph nearly fits vertically too, use the classic fit
-    const fullFit = clamp(Math.min(w / (bw + pad * 2), h / (bh + pad * 2)), MIN_SCALE, 1.25)
-    if (fullFit >= scale * 0.75) scale = fullFit
+  // Home view: anchored at the TOP of the timeline (first transactions),
+  // width-fitted but never below a readable floor — the user scrolls down
+  // for the rest. Used for the initial framing and the recenter button.
+  const homeTransform = useCallback(() => {
+    const { w } = sizeRef.current
+    const { width: bw } = model.bounds
+    if (!w || !bw) return { tx: 0, ty: 0, scale: 1 }
+    const pad = 32
+    const scale = clamp(w / (bw + pad * 2), 0.7, 1.25)
     return {
-      tx: (w - bw * scale) / 2,
-      ty: bh * scale <= h ? (h - bh * scale) / 2 : 16,
+      tx: bw * scale <= w ? (w - bw * scale) / 2 : 8, // left-anchor on overflow
+      ty: 16,
       scale,
     }
   }, [model])
 
-  const zoomToFit = useCallback(() => animateTo(fitTransform()), [animateTo, fitTransform])
+  const recenter = useCallback(() => animateTo(homeTransform()), [animateTo, homeTransform])
 
-  // Frame the graph whenever the layout (data/filters) changes
+  // Back to the top view whenever the layout (data/selection) changes
   useEffect(() => {
-    if (sizeRef.current.w) setViewNow(fitTransform())
-  }, [fitTransform, setViewNow])
+    if (sizeRef.current.w) setViewNow(homeTransform())
+  }, [homeTransform, setViewNow])
 
   const onLayout = useCallback(
     (e) => {
@@ -273,9 +337,10 @@ export default function PhysicsGraphView() {
           offsetRef.current = { x, y }
         })
       }
-      if (first) setViewNow(fitTransform())
+      if (first) setViewNow(homeTransform())
+      else updateRange()
     },
-    [fitTransform, setViewNow]
+    [homeTransform, setViewNow, updateRange]
   )
 
   /* ------------------------------- Gestures ------------------------------- */
@@ -370,6 +435,7 @@ export default function PhysicsGraphView() {
             const wx = (s.mid0.x - s.startView.tx) / s.startView.scale
             const wy = (s.mid0.y - s.startView.ty) / s.startView.scale
             setView({ tx: mid.x - wx * scale, ty: mid.y - wy * scale, scale })
+            scheduleRange()
           } else if (touches.length === 1) {
             // 1 finger: pan (rebase when coming back from a pinch)
             if (s.mode !== 'pan') {
@@ -382,6 +448,7 @@ export default function PhysicsGraphView() {
             const dy = touches[0].pageY - s.p0.y
             if (Math.abs(dx) + Math.abs(dy) > 6) s.moved = true
             setView({ tx: s.startView.tx + dx, ty: s.startView.ty + dy, scale: s.startView.scale })
+            scheduleRange()
           }
         },
         onPanResponderRelease: (evt) => {
@@ -407,40 +474,29 @@ export default function PhysicsGraphView() {
             }
           }
           s.mode = null
+          updateRange() // settle the visible window after the gesture
         },
         onPanResponderTerminate: () => {
           gRef.current.mode = null
+          updateRange()
         },
       }),
-    [handleTap, zoomAt]
+    [handleTap, zoomAt, scheduleRange, updateRange]
   )
 
   /* ------------------------------- Rendering ------------------------------ */
 
-  // Static graph content, memoized so pan/zoom only re-renders the root <G>
+  // Windowed SVG content: only the rows inside `range` are materialized.
+  // Every dependency is stable between range updates (model and colors are
+  // memoized, selectedId only changes on tap), so panning between two range
+  // recomputations re-renders nothing but the root <G> transform.
   const content = useMemo(() => {
     const els = []
-
-    // Day markers in the left margin
-    for (let i = 0; i < model.dayMarkers.length; i++) {
-      const m = model.dayMarkers[i]
-      els.push(
-        <SvgText
-          key={`d${i}`}
-          x={DATE_X}
-          y={m.y + 3}
-          fontSize={10}
-          fontFamily={fonts.medium}
-          fill={colors.muted}
-          textAnchor="end"
-        >
-          {m.label}
-        </SvgText>
-      )
-    }
+    const { min, max } = range
 
     for (let i = 0; i < model.edges.length; i++) {
       const e = model.edges[i]
+      if (e.rowMax < min || e.rowMin > max) continue // outside the window
       const a = model.nodeById.get(e.from)
       const b = model.nodeById.get(e.to)
       if (!a || !b) continue
@@ -465,13 +521,12 @@ export default function PhysicsGraphView() {
     }
 
     for (const node of model.nodes) {
+      if (node.row < min || node.row > max) continue // outside the window
       const selected = node.id === selectedId
 
       if (node.kind === 'header') {
-        // Account header: colored circle with the initial + name pill below
+        // Account header: colored circle with the initial + name below
         const name = node.account.name || '?'
-        const pillW = Math.max(6, name.length) * 5.6 + 14
-        const pillY = node.y + node.r + 5
         els.push(
           <G key={node.id}>
             <Circle
@@ -487,25 +542,15 @@ export default function PhysicsGraphView() {
               y={node.y + 5.5}
               fontSize={16}
               fontFamily={fonts.semibold}
-              fill="#FFFFFF"
+              fill={contrastText(node.account.color)}
               textAnchor="middle"
             >
               {name.trim().charAt(0).toUpperCase()}
             </SvgText>
-            <Rect
-              x={node.x - pillW / 2}
-              y={pillY}
-              width={pillW}
-              height={17}
-              rx={8}
-              fill={colors.surface}
-              stroke={colors.line}
-              strokeWidth={1}
-            />
             <SvgText
               x={node.x}
-              y={pillY + 11.5}
-              fontSize={9}
+              y={node.y + node.r + 15}
+              fontSize={10}
               fontFamily={fonts.semibold}
               fill={colors.ink}
               textAnchor="middle"
@@ -517,11 +562,9 @@ export default function PhysicsGraphView() {
         continue
       }
 
-      const amount = fmtSigned(node.tx.type, node.tx.amount)
-      const amountColor = node.tx.type === 'CREDIT' ? colors.success : colors.danger
-      const sub = shortDay(node.tx.date)
-      const pillW = Math.max(amount.length, sub.length) * 5.6 + 14
-      const pillY = node.y + node.r + 5
+      // Signed compact amount INSIDE the node, sized to fit the radius
+      const label = compactAmount(node.tx.type, node.tx.amount)
+      const fontSize = clamp((node.r * 1.7) / (label.length * 0.62), 8, 13)
       els.push(
         <G key={node.id}>
           <Circle
@@ -532,6 +575,16 @@ export default function PhysicsGraphView() {
             stroke={selected ? colors.ink : colors.surface}
             strokeWidth={selected ? 3 : 2}
           />
+          <SvgText
+            x={node.x}
+            y={node.y + fontSize * 0.36}
+            fontSize={fontSize}
+            fontFamily={fonts.bold}
+            fill={contrastText(node.account.color)}
+            textAnchor="middle"
+          >
+            {label}
+          </SvgText>
           {node.hiddenTransfer ? (
             // Transfer whose partner account is not displayed
             <Path
@@ -543,59 +596,21 @@ export default function PhysicsGraphView() {
               fill="none"
             />
           ) : null}
-          {/* Small label pill under the node (surface bg, radius 8) */}
-          <Rect
-            x={node.x - pillW / 2}
-            y={pillY}
-            width={pillW}
-            height={26}
-            rx={8}
-            fill={colors.surface}
-            stroke={colors.line}
-            strokeWidth={1}
-          />
-          <SvgText
-            x={node.x}
-            y={pillY + 11}
-            fontSize={9}
-            fontFamily={fonts.semibold}
-            fill={amountColor}
-            textAnchor="middle"
-          >
-            {amount}
-          </SvgText>
-          <SvgText
-            x={node.x}
-            y={pillY + 21.5}
-            fontSize={8}
-            fontFamily={fonts.regular}
-            fill={colors.muted}
-            textAnchor="middle"
-          >
-            {sub}
-          </SvgText>
         </G>
       )
     }
     return els
-  }, [model, colors, selectedId])
+  }, [model, colors, selectedId, range])
 
   const selectedNode = selectedId ? model.nodeById.get(selectedId) : null
 
-  const periodOptions = [
-    { label: t('period.7d'), value: '7d' },
-    { label: t('period.30d'), value: '30d' },
-    { label: t('period.all'), value: '' },
-  ]
-
   return (
     <View style={{ flex: 1 }}>
-      {/* Filters: multi-select account chips + quick period (default 30 days) */}
+      {/* Multi-select account chips ("All" + one per account) */}
       <View style={styles.filters}>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
-          style={{ flex: 1 }}
           contentContainerStyle={styles.chipRow}
         >
           <Pressable
@@ -651,13 +666,6 @@ export default function PhysicsGraphView() {
             )
           })}
         </ScrollView>
-        <FilterChip
-          label={periodOptions.find((p) => p.value === period)?.label || t('period.all')}
-          active={period !== ''}
-          options={periodOptions}
-          value={period}
-          onChange={setPeriod}
-        />
       </View>
 
       {!loading && model.cols === 0 ? (
@@ -679,9 +687,9 @@ export default function PhysicsGraphView() {
             ) : null}
           </View>
 
-          {/* Floating recenter button (zoom-to-fit) */}
+          {/* Floating recenter button (back to the top of the timeline) */}
           <Pressable
-            onPress={zoomToFit}
+            onPress={recenter}
             accessibilityLabel={t('graph.recenter')}
             style={({ pressed }) => [
               styles.recenter,
@@ -750,9 +758,6 @@ export default function PhysicsGraphView() {
 
 const styles = StyleSheet.create({
   filters: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
     paddingHorizontal: 20,
     paddingBottom: 10,
   },

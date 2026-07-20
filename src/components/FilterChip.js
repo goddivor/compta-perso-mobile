@@ -1,5 +1,4 @@
-// Small filter chip that opens a bottom-sheet option list.
-// Shared by the Transactions and Graph screens.
+// Small filter chip that opens a bottom-sheet option list (Stats screen).
 import { memo, useState } from 'react'
 import { Text, Pressable, Modal, FlatList, StyleSheet } from 'react-native'
 import Ionicons from '@expo/vector-icons/Ionicons'
