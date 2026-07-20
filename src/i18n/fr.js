@@ -129,6 +129,7 @@ export default {
   'report.viewGraph': 'Vue graphe',
 
   /* ------------------------------- Graphe -------------------------------- */
+  'graph.allChip': 'Tous',
   'graph.empty': 'Aucune transaction à afficher sur cette période.',
   'graph.recenter': 'Recentrer le graphe',
   'graph.initialBalance': 'Solde initial',

@@ -1,5 +1,5 @@
 // Daily report: summary band (total in / total out / net) and per-day list.
-// A header toggle switches between this list and the force-directed
+// A header toggle switches between this list and the chronological-columns
 // transaction graph (PhysicsGraphView).
 // Perf: deferred loading, memoized day rows, stable renderItem.
 import { memo, useCallback, useMemo, useState } from 'react'

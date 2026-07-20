@@ -128,6 +128,7 @@ export default {
   'report.viewGraph': 'Graph view',
 
   /* -------------------------------- Graph -------------------------------- */
+  'graph.allChip': 'All',
   'graph.empty': 'No transactions to display for this period.',
   'graph.recenter': 'Recenter the graph',
   'graph.initialBalance': 'Initial balance',
