@@ -5,11 +5,19 @@
 // without any account. The web client ID is inlined at build time from
 // EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID (.env, gitignored); when missing, every
 // interactive action fails with a clean 'not_configured' error.
-import { GoogleSignin } from '@react-native-google-signin/google-signin'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import * as Device from 'expo-device'
 import { dumpAllData, restoreAllData } from '../db/database'
 import { getCurrentVersion } from '../updates/updater'
+
+// The native module only exists in full builds (dev build / APK), not in
+// Expo Go: load it lazily so the whole bundle keeps working there.
+let GoogleSignin = null
+try {
+  GoogleSignin = require('@react-native-google-signin/google-signin').GoogleSignin
+} catch (_) {
+  GoogleSignin = null
+}
 
 const WEB_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID
 const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.appdata'
@@ -39,12 +47,12 @@ export class BackupError extends Error {
 /* ----------------------------- Google account ---------------------------- */
 
 export function isGoogleConfigured() {
-  return !!WEB_CLIENT_ID
+  return !!WEB_CLIENT_ID && !!GoogleSignin
 }
 
 let configured = false
 function ensureConfigured() {
-  if (!WEB_CLIENT_ID) throw new BackupError('not_configured')
+  if (!WEB_CLIENT_ID || !GoogleSignin) throw new BackupError('not_configured')
   if (!configured) {
     GoogleSignin.configure({ webClientId: WEB_CLIENT_ID, scopes: [DRIVE_SCOPE] })
     configured = true
