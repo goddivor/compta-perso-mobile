@@ -5,7 +5,9 @@
 // (row height ~90), so time flows downward and every account reads like a
 // queue. Transfer pairs whose two sides are visible share the SAME row and
 // are linked debit -> credit by a primary-yellow arrow across the columns.
-// The signed amount is drawn INSIDE each node (compact notation when long).
+// Each node shows the FULL signed amount (green/red, Intl-formatted for the
+// active language) with the dd/mm date below; the circle radius adapts to
+// the text width so the amount always fits.
 //
 // The canvas is a free space: pan / pinch-zoom / double-tap with a plain
 // PanResponder (no extra native dependency), recenter button, detail card.
@@ -18,39 +20,38 @@ import Svg, { G, Line, Path, Circle, Text as SvgText } from 'react-native-svg'
 import Ionicons from '@expo/vector-icons/Ionicons'
 import { useTheme, fonts, radius, shadowOverlay } from '../theme/tokens'
 import { listAccounts, listTransactionsForGraph } from '../db/database'
-import { fmt, fmtSigned, fmtDate } from '../utils/format'
+import { fmt, fmtSigned, fmtNumber, fmtDate } from '../utils/format'
 import { useTick } from '../context/AppContext'
 import { useFocusData } from '../hooks/useFocusData'
-import { useT } from '../i18n'
+import { useI18n } from '../i18n'
 import { EmptyState, Dot } from '../components/ui'
 
 const MIN_SCALE = 0.3
 const MAX_SCALE = 4
-const MIN_R = 20
-const MAX_R = 34
+const MIN_R = 22
+const MAX_R = 46
 const HEADER_R = 24
+const AMOUNT_FS = 11 // font size of the in-node amount
+const CHAR_W = 0.62 // approx. SVG glyph width, as a fraction of the font size
 
 // Layout constants (graph units)
 const COL0_X = 96 // x of the first column
 const COL_SPACING = 220
 const HEADER_Y = 34
 const ROW0_Y = HEADER_Y + 112 // y of the first transaction row
-const ROW_H = 90
+const ROW_H = 104
 
 // Windowed rendering
 const ROW_MARGIN = 12 // extra rows rendered above/below the viewport
 const RANGE_THROTTLE_MS = 150
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v))
+const shortDay = (iso) => (iso ? `${String(iso).slice(8, 10)}/${String(iso).slice(5, 7)}` : '')
 
-// Compact French amount for in-node display: 850, 12,5k, 1,2M
-function compactAmount(type, n) {
-  const sign = type === 'CREDIT' ? '+' : '-'
-  const abs = Math.abs(Math.round(n || 0))
-  const one = (v) => v.toFixed(1).replace('.0', '').replace('.', ',')
-  if (abs >= 1e6) return `${sign}${one(abs / 1e6)}M`
-  if (abs >= 1e4) return `${sign}${one(abs / 1e3)}k`
-  return `${sign}${abs}`
+// Circle radius that fits the amount text: approximate the SVG text width
+// (chars x font size x 0.62), half of it + padding, bounded [22, 46]
+function radiusForLabel(label) {
+  return clamp((label.length * AMOUNT_FS * CHAR_W) / 2 + 10, MIN_R, MAX_R)
 }
 
 // Ink on light node colors, white on dark ones (luminance cut)
@@ -85,7 +86,7 @@ function edgeGeometry(p1, p2, r1, r2) {
 
 export default function PhysicsGraphView() {
   const { colors } = useTheme()
-  const t = useT()
+  const { t, locale } = useI18n()
   const tick = useTick()
 
   const [accounts, setAccounts] = useState([])
@@ -121,7 +122,9 @@ export default function PhysicsGraphView() {
       cache.txs = txs
       cache.map.clear()
     }
-    const key = selectedIds === null ? 'all' : [...selectedIds].sort((a, b) => a - b).join(',')
+    // Locale in the key: node labels/radii depend on the number formatting
+    const ids = selectedIds === null ? 'all' : [...selectedIds].sort((a, b) => a - b).join(',')
+    const key = `${locale}|${ids}`
     const hit = cache.map.get(key)
     if (hit) return hit
 
@@ -147,11 +150,6 @@ export default function PhysicsGraphView() {
       rowCount++
     }
 
-    // Node sizes: radius proportional to sqrt(amount), bounded 20..34
-    let maxW = 1
-    for (const tx of visibleTxs) if (tx.amount > maxW) maxW = tx.amount
-    const sqrtMax = Math.sqrt(maxW) || 1
-
     const nodes = []
     const nodeById = new Map()
     const push = (node) => {
@@ -172,6 +170,8 @@ export default function PhysicsGraphView() {
     }
     for (const tx of visibleTxs) {
       const row = rowById.get(tx.id)
+      // Full signed amount (Intl for the active language), never compacted
+      const label = (tx.type === 'CREDIT' ? '+' : '-') + fmtNumber(tx.amount)
       push({
         id: `t${tx.id}`,
         kind: 'tx',
@@ -180,7 +180,9 @@ export default function PhysicsGraphView() {
         row,
         x: colX.get(tx.account_id),
         y: ROW0_Y + row * ROW_H,
-        r: clamp(MIN_R + (MAX_R - MIN_R) * (Math.sqrt(tx.amount) / sqrtMax), MIN_R, MAX_R),
+        r: radiusForLabel(label),
+        label,
+        dateLabel: shortDay(tx.date),
         // Transfer whose partner account is hidden: chevron indicator
         hiddenTransfer: !!tx.transfer_pair_id && !txById.has(tx.transfer_pair_id),
       })
@@ -225,7 +227,7 @@ export default function PhysicsGraphView() {
     }
     cache.map.set(key, result)
     return result
-  }, [accounts, txs, selectedIds])
+  }, [accounts, txs, selectedIds, locale])
 
   /* --------------------------- Pan / zoom state --------------------------- */
 
@@ -562,28 +564,38 @@ export default function PhysicsGraphView() {
         continue
       }
 
-      // Signed compact amount INSIDE the node, sized to fit the radius
-      const label = compactAmount(node.tx.type, node.tx.amount)
-      const fontSize = clamp((node.r * 1.7) / (label.length * 0.62), 8, 13)
+      // Full signed amount + dd/mm date, two centered lines inside a
+      // surface-filled disc ringed with the account color (readable in
+      // light and dark, amount green/red like the desktop app)
       els.push(
         <G key={node.id}>
           <Circle
             cx={node.x}
             cy={node.y}
             r={node.r}
-            fill={node.account.color}
-            stroke={selected ? colors.ink : colors.surface}
-            strokeWidth={selected ? 3 : 2}
+            fill={colors.surface}
+            stroke={selected ? colors.ink : node.account.color}
+            strokeWidth={selected ? 3.5 : 2.5}
           />
           <SvgText
             x={node.x}
-            y={node.y + fontSize * 0.36}
-            fontSize={fontSize}
+            y={node.y - 1.5}
+            fontSize={AMOUNT_FS}
             fontFamily={fonts.bold}
-            fill={contrastText(node.account.color)}
+            fill={node.tx.type === 'CREDIT' ? colors.success : colors.danger}
             textAnchor="middle"
           >
-            {label}
+            {node.label}
+          </SvgText>
+          <SvgText
+            x={node.x}
+            y={node.y + 10.5}
+            fontSize={8.5}
+            fontFamily={fonts.regular}
+            fill={colors.muted}
+            textAnchor="middle"
+          >
+            {node.dateLabel}
           </SvgText>
           {node.hiddenTransfer ? (
             // Transfer whose partner account is not displayed
