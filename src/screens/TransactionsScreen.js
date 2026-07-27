@@ -69,7 +69,7 @@ export default function TransactionsScreen({ navigation, route }) {
   const { colors } = useTheme()
   const t = useT()
   const { tick, refresh } = useApp()
-  const { filters, setFilters, search, setSearch, activeCount } = useFilters()
+  const { filters, setFilters, resetFilters, search, setSearch, activeCount } = useFilters()
   const [txs, setTxs] = useState([])
   const [input, setInput] = useState(search)
   const [fanAccounts, setFanAccounts] = useState([])
@@ -90,16 +90,22 @@ export default function TransactionsScreen({ navigation, route }) {
   // Account filter pushed from the Home screen
   useEffect(() => {
     if (route.params?.filterStamp) {
-      setFilters((f) => ({ ...f, account_id: route.params.accountId || null }))
+      setFilters((f) => ({
+        ...f,
+        account_ids: route.params.accountId ? [route.params.accountId] : [],
+        accounts_exclude: false,
+      }))
     }
   }, [route.params?.filterStamp])
 
   const { loading } = useFocusData(() => {
     setTxs(
       listTransactions({
-        account_id: filters.account_id || undefined,
+        account_ids: filters.account_ids,
+        accounts_exclude: filters.accounts_exclude,
         type: filters.type || undefined,
-        category_id: filters.category_id || undefined,
+        category_ids: filters.category_ids,
+        categories_exclude: filters.categories_exclude,
         date_from: filters.date_from || undefined,
         date_to: filters.date_to || undefined,
       })
@@ -169,7 +175,7 @@ export default function TransactionsScreen({ navigation, route }) {
       const cx = bx + bw / 2
       const cy = by + bh / 2
       const accs = fanAccountsRef.current
-      // First bubble clears the account filter, then accounts by usage
+      // First bubble clears EVERY filter, then accounts by usage
       const defs = [
         { key: 'clear', isClear: true, accountId: null },
         ...accs.map((a) => ({
@@ -199,6 +205,8 @@ export default function TransactionsScreen({ navigation, route }) {
 
   const filtersRef = useRef(setFilters)
   filtersRef.current = setFilters
+  const resetRef = useRef(resetFilters)
+  resetRef.current = resetFilters
 
   const fanPan = useMemo(
     () =>
@@ -242,7 +250,14 @@ export default function TransactionsScreen({ navigation, route }) {
           if (s.active) {
             const { pageX, pageY } = evt.nativeEvent
             const hit = s.bubbles.find((b) => Math.hypot(pageX - b.wx, pageY - b.wy) <= HIT_RADIUS)
-            if (hit) filtersRef.current((f) => ({ ...f, account_id: hit.accountId }))
+            if (hit) {
+              if (hit.isClear) {
+                resetRef.current() // ✕ bubble: clear EVERY filter (not search)
+              } else {
+                // Replace the account selection with this single account
+                filtersRef.current((f) => ({ ...f, account_ids: [hit.accountId], accounts_exclude: false }))
+              }
+            }
             hideFan() // release elsewhere: cancel, everything disappears
           } else if (Date.now() - s.startAt < LONG_PRESS_MS) {
             openFilter() // short tap: current behavior (Filter screen)
@@ -367,7 +382,14 @@ export default function TransactionsScreen({ navigation, route }) {
 
       {/* Floating add button */}
       <Pressable
-        onPress={() => navigation.navigate('TransactionForm', { defaultAccountId: filters.account_id || undefined })}
+        onPress={() =>
+          navigation.navigate('TransactionForm', {
+            defaultAccountId:
+              !filters.accounts_exclude && filters.account_ids.length === 1
+                ? filters.account_ids[0]
+                : undefined,
+          })
+        }
         style={({ pressed }) => [
           styles.fab,
           shadowOverlay,

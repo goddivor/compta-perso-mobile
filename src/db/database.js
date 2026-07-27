@@ -146,11 +146,47 @@ export function deleteCategory(id) {
 
 /* ---------------------------- Transactions ----------------------------- */
 
+// Filters: account_ids ([] = all) + accounts_exclude, type,
+// category_ids ([] = all, may contain 'none' = uncategorized) +
+// categories_exclude, date_from, date_to.
 export function listTransactions(filters = {}) {
   const where = ['t.forecast_session_id IS NULL']
   const params = []
-  if (filters.account_id) { where.push('t.account_id = ?'); params.push(filters.account_id) }
-  if (filters.category_id) { where.push('t.category_id = ?'); params.push(filters.category_id) }
+
+  const accountIds = filters.account_ids || []
+  if (accountIds.length > 0) {
+    const marks = accountIds.map(() => '?').join(',')
+    where.push(`t.account_id ${filters.accounts_exclude ? 'NOT IN' : 'IN'} (${marks})`)
+    params.push(...accountIds)
+  }
+
+  const catValues = filters.category_ids || []
+  if (catValues.length > 0) {
+    const wantNone = catValues.includes('none')
+    const catIds = catValues.filter((v) => v !== 'none')
+    const marks = catIds.map(() => '?').join(',')
+    if (!filters.categories_exclude) {
+      // Include: category in the list, and/or uncategorized when 'none'
+      const parts = []
+      if (catIds.length > 0) parts.push(`t.category_id IN (${marks})`)
+      if (wantNone) parts.push('t.category_id IS NULL')
+      where.push(`(${parts.join(' OR ')})`)
+    } else {
+      // Exclude: NOT IN alone would also drop NULL rows (NULL NOT IN -> NULL),
+      // so uncategorized rows are kept unless 'none' itself is excluded
+      const parts = []
+      if (catIds.length > 0) {
+        parts.push(wantNone
+          ? `(t.category_id IS NOT NULL AND t.category_id NOT IN (${marks}))`
+          : `(t.category_id IS NULL OR t.category_id NOT IN (${marks}))`)
+      } else if (wantNone) {
+        parts.push('t.category_id IS NOT NULL')
+      }
+      where.push(parts.join(' AND '))
+    }
+    params.push(...catIds)
+  }
+
   if (filters.type) { where.push('t.type = ?'); params.push(filters.type) }
   if (filters.date_from) { where.push('date(t.date) >= ?'); params.push(filters.date_from) }
   if (filters.date_to) { where.push('date(t.date) <= ?'); params.push(filters.date_to) }
@@ -318,24 +354,40 @@ export function getBalanceHistory(accountId) {
   return points
 }
 
-// Total DEBIT per category (desktop stats:getExpensesByCategory)
+// Total DEBIT per category. Returns EVERY category (LEFT JOIN from
+// categories, total 0 when unused over the period) plus an uncategorized
+// row (category_id null) when uncategorized expenses exist. Sorted by
+// total DESC, then alphabetically (groups the zeros at the end).
 export function getExpensesByCategory({ account_id, date_from, date_to } = {}) {
-  const where = ["t.type='DEBIT'", 't.forecast_session_id IS NULL']
+  // Period/account constraints live in the JOIN clause so categories
+  // without any matching transaction still come back with total 0.
+  const join = ['t.category_id = c.id', "t.type='DEBIT'", 't.forecast_session_id IS NULL']
+  const cond = []
   const params = []
-  if (account_id) { where.push('t.account_id=?'); params.push(account_id) }
-  if (date_from) { where.push('date(t.date)>=?'); params.push(date_from) }
-  if (date_to) { where.push('date(t.date)<=?'); params.push(date_to) }
+  if (account_id) { cond.push('t.account_id=?'); params.push(account_id) }
+  if (date_from) { cond.push('date(t.date)>=?'); params.push(date_from) }
+  if (date_to) { cond.push('date(t.date)<=?'); params.push(date_to) }
 
-  return getDb().getAllSync(`
-    SELECT COALESCE(c.name,'Sans catégorie') AS name,
-           COALESCE(c.color,'#6B7280') AS color,
-           SUM(t.amount) AS total
-    FROM transactions t
-    LEFT JOIN categories c ON t.category_id = c.id
-    WHERE ${where.join(' AND ')}
-    GROUP BY t.category_id
-    ORDER BY total DESC
+  const rows = getDb().getAllSync(`
+    SELECT c.id AS category_id, c.name AS name, c.color AS color,
+           COALESCE(SUM(t.amount), 0) AS total
+    FROM categories c
+    LEFT JOIN transactions t ON ${[...join, ...cond].join(' AND ')}
+    GROUP BY c.id
   `, params)
+
+  const none = getDb().getFirstSync(`
+    SELECT SUM(t.amount) AS total
+    FROM transactions t
+    WHERE t.category_id IS NULL AND t.type='DEBIT' AND t.forecast_session_id IS NULL
+    ${cond.length ? 'AND ' + cond.join(' AND ') : ''}
+  `, params)
+  if (none?.total > 0) rows.push({ category_id: null, name: null, color: null, total: none.total })
+
+  rows.sort(
+    (a, b) => b.total - a.total || String(a.name || '￿').localeCompare(String(b.name || '￿'))
+  )
+  return rows
 }
 
 // Income/expenses per month, last 12 (desktop stats:getMonthlyFlow)

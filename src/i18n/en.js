@@ -51,7 +51,7 @@ export default {
   'tx.income': 'Income',
   'tx.expense': 'Expense',
   'tx.inclFees': 'incl. {amount} fees',
-  'tx.quickFilterClear': 'Clear account filter',
+  'tx.quickFilterClear': 'Clear all filters',
 
   /* --------------------------- Transaction form -------------------------- */
   'form.editTransfer': 'Edit transfer',
@@ -94,6 +94,10 @@ export default {
   'filter.debit': 'Debit',
   'filter.credit': 'Credit',
   'filter.category': 'Category',
+  'filter.noCategory': 'Uncategorized',
+  'filter.include': 'Include',
+  'filter.exclude': 'Exclude',
+  'filter.excludeHint': 'Hide the selected items',
   'filter.apply': 'Search over this period',
 
   /* -------------------------------- Stats -------------------------------- */
@@ -104,6 +108,7 @@ export default {
   'stats.currentBalance': 'Current balance: ',
   'stats.expensesByCategory': 'Expenses by category',
   'stats.noExpenses': 'No expenses over the period.',
+  'stats.noCategory': 'Uncategorized',
   'stats.total': 'Total',
   'stats.monthlyFlow': 'Monthly income / expenses',
   'stats.income': 'Income',

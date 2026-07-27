@@ -1,13 +1,18 @@
 // Shared transactions filter state: search text + filters, consumed by
-// TransactionsScreen (list + search bar) and FilterScreen (full-screen filter).
+// TransactionsScreen (list + search bar + quick account fan), FilterScreen
+// (full-screen filter) and the Stats legend shortcuts.
+// Accounts and categories are MULTI-select lists with an optional exclude
+// mode; category_ids may contain the special value 'none' (uncategorized).
 import { createContext, useContext, useMemo, useState, useCallback } from 'react'
 
 export const emptyFilters = {
-  account_id: null,   // number | null
-  type: null,         // 'CREDIT' | 'DEBIT' | null
-  category_id: null,  // number | null
-  date_from: null,    // 'YYYY-MM-DD' | null
-  date_to: null,      // 'YYYY-MM-DD' | null
+  account_ids: [],          // [] = every account; else list of account ids
+  accounts_exclude: false,  // true = every account EXCEPT account_ids
+  type: null,               // 'CREDIT' | 'DEBIT' | null
+  category_ids: [],         // [] = every category; may contain 'none'
+  categories_exclude: false,
+  date_from: null,          // 'YYYY-MM-DD' | null
+  date_to: null,            // 'YYYY-MM-DD' | null
 }
 
 const FiltersContext = createContext(null)
@@ -18,8 +23,13 @@ export function FiltersProvider({ children }) {
 
   const resetFilters = useCallback(() => setFilters(emptyFilters), [])
 
+  // One unit per active filter group (accounts, type, categories, period)
   const activeCount = useMemo(
-    () => Object.entries(filters).filter(([, v]) => v !== null && v !== '').length,
+    () =>
+      (filters.account_ids.length > 0 ? 1 : 0) +
+      (filters.type ? 1 : 0) +
+      (filters.category_ids.length > 0 ? 1 : 0) +
+      (filters.date_from || filters.date_to ? 1 : 0),
     [filters]
   )
 

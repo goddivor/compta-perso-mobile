@@ -52,7 +52,7 @@ export default {
   'tx.income': 'Entrée',
   'tx.expense': 'Dépense',
   'tx.inclFees': 'dont {amount} frais',
-  'tx.quickFilterClear': 'Effacer le filtre de compte',
+  'tx.quickFilterClear': 'Effacer tous les filtres',
 
   /* -------------------------- Formulaire transaction --------------------- */
   'form.editTransfer': 'Modifier le transfert',
@@ -95,6 +95,10 @@ export default {
   'filter.debit': 'Débit',
   'filter.credit': 'Crédit',
   'filter.category': 'Catégorie',
+  'filter.noCategory': 'Sans catégorie',
+  'filter.include': 'Inclure',
+  'filter.exclude': 'Exclure',
+  'filter.excludeHint': 'Masquer les éléments sélectionnés',
   'filter.apply': 'Rechercher selon cette période',
 
   /* -------------------------------- Stats -------------------------------- */
@@ -105,6 +109,7 @@ export default {
   'stats.currentBalance': 'Solde actuel : ',
   'stats.expensesByCategory': 'Dépenses par catégorie',
   'stats.noExpenses': 'Aucune dépense sur la période.',
+  'stats.noCategory': 'Sans catégorie',
   'stats.total': 'Total',
   'stats.monthlyFlow': 'Entrées / Sorties par mois',
   'stats.income': 'Entrées',

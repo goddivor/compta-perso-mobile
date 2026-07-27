@@ -2,13 +2,14 @@
 // Works on a local DRAFT initialized from the shared FiltersContext:
 // nothing is applied until the bottom CTA is pressed. Offers quick ranges,
 // previous-month cards, a home-made inline range calendar (pure JS Date),
-// and single-choice chips for account / type / category.
+// MULTI-select chips for accounts / categories (with an include/exclude
+// toggle per section and an "uncategorized" chip) and type chips.
 import { useMemo, useState } from 'react'
 import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import Ionicons from '@expo/vector-icons/Ionicons'
 import { useTheme, fonts, radius } from '../theme/tokens'
-import { Button, Dot } from '../components/ui'
+import { Button, Dot, Segmented } from '../components/ui'
 import { useFilters, emptyFilters } from '../context/FiltersContext'
 import { listAccounts, listCategories } from '../db/database'
 import { monthName, weekdayInitials } from '../utils/format'
@@ -219,10 +220,26 @@ export default function FilterScreen({ navigation }) {
 
   const toggle = (field, value) => patch({ [field]: draft[field] === value ? null : value })
 
+  // Multi-select: toggle one id inside an array field (immutable update)
+  const toggleId = (field, value) =>
+    patch({
+      [field]: draft[field].includes(value)
+        ? draft[field].filter((v) => v !== value)
+        : [...draft[field], value],
+    })
+
   const apply = () => {
-    setFilters({ ...draft })
+    // Single day picked in the calendar (no end tapped): filter that day
+    // only — not "from that day until today"
+    const date_to = draft.date_from && !draft.date_to ? draft.date_from : draft.date_to
+    setFilters({ ...draft, date_to })
     navigation.goBack()
   }
+
+  const includeExclude = [
+    { label: t('filter.include'), value: 'include' },
+    { label: t('filter.exclude'), value: 'exclude' },
+  ]
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
@@ -302,17 +319,31 @@ export default function FilterScreen({ navigation }) {
           <RangeCalendar dateFrom={draft.date_from} dateTo={draft.date_to} onPickDay={onPickDay} />
         </View>
 
-        {/* Account */}
+        {/* Accounts (multi-select + include/exclude) */}
         <View style={{ gap: 12 }}>
-          <SectionLabel>{t('filter.account')}</SectionLabel>
+          <View style={styles.sectionHeader}>
+            <SectionLabel>{t('filter.account')}</SectionLabel>
+            <View style={{ width: 172 }}>
+              <Segmented
+                segments={includeExclude}
+                value={draft.accounts_exclude ? 'exclude' : 'include'}
+                onChange={(v) => patch({ accounts_exclude: v === 'exclude' })}
+              />
+            </View>
+          </View>
+          {draft.accounts_exclude ? (
+            <Text style={{ fontFamily: fonts.regular, fontSize: 12, color: colors.muted }}>
+              {t('filter.excludeHint')}
+            </Text>
+          ) : null}
           <View style={styles.chipRow}>
             {accounts.map((a) => (
               <Chip
                 key={a.id}
                 label={a.name}
                 dotColor={a.color}
-                active={draft.account_id === a.id}
-                onPress={() => toggle('account_id', a.id)}
+                active={draft.account_ids.includes(a.id)}
+                onPress={() => toggleId('account_ids', a.id)}
               />
             ))}
             {accounts.length === 0 ? (
@@ -332,19 +363,39 @@ export default function FilterScreen({ navigation }) {
           </View>
         </View>
 
-        {/* Category */}
+        {/* Categories (multi-select + include/exclude + uncategorized) */}
         <View style={{ gap: 12 }}>
-          <SectionLabel>{t('filter.category')}</SectionLabel>
+          <View style={styles.sectionHeader}>
+            <SectionLabel>{t('filter.category')}</SectionLabel>
+            <View style={{ width: 172 }}>
+              <Segmented
+                segments={includeExclude}
+                value={draft.categories_exclude ? 'exclude' : 'include'}
+                onChange={(v) => patch({ categories_exclude: v === 'exclude' })}
+              />
+            </View>
+          </View>
+          {draft.categories_exclude ? (
+            <Text style={{ fontFamily: fonts.regular, fontSize: 12, color: colors.muted }}>
+              {t('filter.excludeHint')}
+            </Text>
+          ) : null}
           <View style={styles.chipRow}>
             {categories.map((c) => (
               <Chip
                 key={c.id}
                 label={c.name}
                 dotColor={c.color}
-                active={draft.category_id === c.id}
-                onPress={() => toggle('category_id', c.id)}
+                active={draft.category_ids.includes(c.id)}
+                onPress={() => toggleId('category_ids', c.id)}
               />
             ))}
+            <Chip
+              label={t('filter.noCategory')}
+              dotColor="#6B7280"
+              active={draft.category_ids.includes('none')}
+              onPress={() => toggleId('category_ids', 'none')}
+            />
           </View>
         </View>
       </ScrollView>
@@ -376,6 +427,12 @@ export default function FilterScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
   chipRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
