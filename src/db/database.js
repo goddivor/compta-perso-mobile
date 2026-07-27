@@ -146,9 +146,18 @@ export function deleteCategory(id) {
 
 /* ---------------------------- Transactions ----------------------------- */
 
+// EFFECTIVE category of a transaction: its own, or (for a transfer leg)
+// the one of its twin. Only ONE side of a transfer pair carries the
+// category_id, so the auto-created twin must inherit it for filtering,
+// display and stats — a categorized transfer never counts as
+// "uncategorized". `p` is the twin joined on t.transfer_pair_id.
+const EFF_CATEGORY = 'COALESCE(t.category_id, p.category_id)'
+
 // Filters: account_ids ([] = all) + accounts_exclude, type,
 // category_ids ([] = all, may contain 'none' = uncategorized) +
 // categories_exclude, date_from, date_to.
+// Category filters and the displayed category_name/color all use the
+// EFFECTIVE category, so both legs of a categorized transfer match.
 export function listTransactions(filters = {}) {
   const where = ['t.forecast_session_id IS NULL']
   const params = []
@@ -166,10 +175,10 @@ export function listTransactions(filters = {}) {
     const catIds = catValues.filter((v) => v !== 'none')
     const marks = catIds.map(() => '?').join(',')
     if (!filters.categories_exclude) {
-      // Include: category in the list, and/or uncategorized when 'none'
+      // Include: effective category in the list, and/or uncategorized
       const parts = []
-      if (catIds.length > 0) parts.push(`t.category_id IN (${marks})`)
-      if (wantNone) parts.push('t.category_id IS NULL')
+      if (catIds.length > 0) parts.push(`${EFF_CATEGORY} IN (${marks})`)
+      if (wantNone) parts.push(`${EFF_CATEGORY} IS NULL`)
       where.push(`(${parts.join(' OR ')})`)
     } else {
       // Exclude: NOT IN alone would also drop NULL rows (NULL NOT IN -> NULL),
@@ -177,10 +186,10 @@ export function listTransactions(filters = {}) {
       const parts = []
       if (catIds.length > 0) {
         parts.push(wantNone
-          ? `(t.category_id IS NOT NULL AND t.category_id NOT IN (${marks}))`
-          : `(t.category_id IS NULL OR t.category_id NOT IN (${marks}))`)
+          ? `(${EFF_CATEGORY} IS NOT NULL AND ${EFF_CATEGORY} NOT IN (${marks}))`
+          : `(${EFF_CATEGORY} IS NULL OR ${EFF_CATEGORY} NOT IN (${marks}))`)
       } else if (wantNone) {
-        parts.push('t.category_id IS NOT NULL')
+        parts.push(`${EFF_CATEGORY} IS NOT NULL`)
       }
       where.push(parts.join(' AND '))
     }
@@ -196,8 +205,9 @@ export function listTransactions(filters = {}) {
       a.name AS account_name, a.color AS account_color,
       c.name AS category_name, c.color AS category_color
     FROM transactions t
+    LEFT JOIN transactions p ON p.id = t.transfer_pair_id
     LEFT JOIN accounts a ON t.account_id = a.id
-    LEFT JOIN categories c ON t.category_id = c.id
+    LEFT JOIN categories c ON c.id = ${EFF_CATEGORY}
     WHERE ${where.join(' AND ')}
     ORDER BY t.date DESC, t.created_at DESC, t.id DESC
     LIMIT 500
@@ -358,28 +368,37 @@ export function getBalanceHistory(accountId) {
 // categories, total 0 when unused over the period) plus an uncategorized
 // row (category_id null) when uncategorized expenses exist. Sorted by
 // total DESC, then alphabetically (groups the zeros at the end).
+// Aggregates on the EFFECTIVE category (own or transfer twin's), so the
+// debit leg of a categorized transfer never feeds "uncategorized".
 export function getExpensesByCategory({ account_id, date_from, date_to } = {}) {
+  // Debits with their effective category resolved once
+  const src = `(
+    SELECT t.id, t.amount, t.date, t.account_id,
+           ${EFF_CATEGORY} AS eff_category_id
+    FROM transactions t
+    LEFT JOIN transactions p ON p.id = t.transfer_pair_id
+    WHERE t.type='DEBIT' AND t.forecast_session_id IS NULL
+  )`
   // Period/account constraints live in the JOIN clause so categories
   // without any matching transaction still come back with total 0.
-  const join = ['t.category_id = c.id', "t.type='DEBIT'", 't.forecast_session_id IS NULL']
   const cond = []
   const params = []
-  if (account_id) { cond.push('t.account_id=?'); params.push(account_id) }
-  if (date_from) { cond.push('date(t.date)>=?'); params.push(date_from) }
-  if (date_to) { cond.push('date(t.date)<=?'); params.push(date_to) }
+  if (account_id) { cond.push('x.account_id=?'); params.push(account_id) }
+  if (date_from) { cond.push('date(x.date)>=?'); params.push(date_from) }
+  if (date_to) { cond.push('date(x.date)<=?'); params.push(date_to) }
 
   const rows = getDb().getAllSync(`
     SELECT c.id AS category_id, c.name AS name, c.color AS color,
-           COALESCE(SUM(t.amount), 0) AS total
+           COALESCE(SUM(x.amount), 0) AS total
     FROM categories c
-    LEFT JOIN transactions t ON ${[...join, ...cond].join(' AND ')}
+    LEFT JOIN ${src} x ON ${['x.eff_category_id = c.id', ...cond].join(' AND ')}
     GROUP BY c.id
   `, params)
 
   const none = getDb().getFirstSync(`
-    SELECT SUM(t.amount) AS total
-    FROM transactions t
-    WHERE t.category_id IS NULL AND t.type='DEBIT' AND t.forecast_session_id IS NULL
+    SELECT SUM(x.amount) AS total
+    FROM ${src} x
+    WHERE x.eff_category_id IS NULL
     ${cond.length ? 'AND ' + cond.join(' AND ') : ''}
   `, params)
   if (none?.total > 0) rows.push({ category_id: null, name: null, color: null, total: none.total })
