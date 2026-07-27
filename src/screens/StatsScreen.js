@@ -1,19 +1,24 @@
 // Stats tab: classic charts built with react-native-gifted-charts.
 // Three cards: balance history (smoothed area line, per account), expenses
-// by category (donut + legend, filterable period) and monthly income vs
-// expenses (grouped bars). All colors come from the theme tokens.
-import { useMemo, useState } from 'react'
-import { View, Text, ScrollView, ActivityIndicator, useWindowDimensions, StyleSheet } from 'react-native'
+// by category (donut + full clickable legend — every category listed, a
+// tap filters the Transactions list on it) and monthly income vs expenses
+// (grouped bars). All colors come from the theme tokens.
+import { useCallback, useMemo, useState } from 'react'
+import { View, Text, ScrollView, Pressable, ActivityIndicator, useWindowDimensions, StyleSheet } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import Ionicons from '@expo/vector-icons/Ionicons'
 import { LineChart, PieChart, BarChart } from 'react-native-gifted-charts'
 import { useTheme, fonts } from '../theme/tokens'
 import { listAccounts, getBalanceHistory, getExpensesByCategory, getMonthlyFlow } from '../db/database'
 import { fmt, today, shiftDay, monthShortLabel } from '../utils/format'
 import { useTick } from '../context/AppContext'
+import { useFilters, emptyFilters } from '../context/FiltersContext'
 import { useFocusData } from '../hooks/useFocusData'
 import { useT } from '../i18n'
 import { Card, Segmented, SectionTitle, EmptyState, Dot } from '../components/ui'
 import { FilterChip } from '../components/FilterChip'
+
+const NO_CATEGORY_COLOR = '#6B7280'
 
 function periodFrom(period) {
   const t = today()
@@ -36,10 +41,11 @@ function dayLabel(iso) {
   return `${d}/${m}`
 }
 
-export default function StatsScreen() {
+export default function StatsScreen({ navigation }) {
   const { colors } = useTheme()
   const t = useT()
   const tick = useTick()
+  const { setFilters } = useFilters()
   const PERIODS = [
     { label: t('period.7d'), value: '7d' },
     { label: t('period.30d'), value: '30d' },
@@ -83,9 +89,23 @@ export default function StatsScreen() {
 
   /* ---------------------- Expenses by category (pie) --------------------- */
   const totalExpenses = useMemo(() => expenses.reduce((s, e) => s + e.total, 0), [expenses])
+  // The donut only draws the shares > 0; the legend lists everything
   const pieData = useMemo(
-    () => expenses.map((e) => ({ value: e.total, color: e.color })),
+    () =>
+      expenses
+        .filter((e) => e.total > 0)
+        .map((e) => ({ value: e.total, color: e.color || NO_CATEGORY_COLOR })),
     [expenses]
+  )
+
+  // Legend tap: filter the Transactions list on that category (or on the
+  // uncategorized special value) and jump to the tab
+  const goToCategory = useCallback(
+    (categoryId) => {
+      setFilters({ ...emptyFilters, category_ids: [categoryId == null ? 'none' : categoryId] })
+      navigation.navigate('TransactionsTab')
+    },
+    [setFilters, navigation]
   )
 
   /* ------------------------ Monthly flow (bars) -------------------------- */
@@ -179,35 +199,47 @@ export default function StatsScreen() {
               <SectionTitle style={{ fontSize: 16 }}>{t('stats.expensesByCategory')}</SectionTitle>
             </View>
             <Segmented segments={PERIODS} value={period} onChange={setPeriod} />
-            {pieData.length === 0 ? (
+            {expenses.length === 0 ? (
               <EmptyState icon="pie-chart-outline" text={t('stats.noExpenses')} />
             ) : (
               <>
-                <View style={{ alignItems: 'center', marginVertical: 6 }}>
-                  <PieChart
-                    data={pieData}
-                    donut
-                    radius={92}
-                    innerRadius={60}
-                    innerCircleColor={colors.surface}
-                    strokeWidth={2}
-                    strokeColor={colors.surface}
-                    centerLabelComponent={() => (
-                      <View style={{ alignItems: 'center' }}>
-                        <Text style={{ fontFamily: fonts.regular, fontSize: 10, color: colors.muted }}>{t('stats.total')}</Text>
-                        <Text style={{ fontFamily: fonts.bold, fontSize: 13, color: colors.ink }}>
-                          {fmt(totalExpenses)}
-                        </Text>
-                      </View>
-                    )}
-                  />
-                </View>
-                <View style={{ gap: 8 }}>
-                  {expenses.map((e, i) => (
-                    <View key={`${e.name}-${i}`} style={styles.legendRow}>
-                      <Dot color={e.color} size={9} />
+                {pieData.length === 0 ? (
+                  <EmptyState icon="pie-chart-outline" text={t('stats.noExpenses')} />
+                ) : (
+                  <View style={{ alignItems: 'center', marginVertical: 6 }}>
+                    <PieChart
+                      data={pieData}
+                      donut
+                      radius={92}
+                      innerRadius={60}
+                      innerCircleColor={colors.surface}
+                      strokeWidth={2}
+                      strokeColor={colors.surface}
+                      centerLabelComponent={() => (
+                        <View style={{ alignItems: 'center' }}>
+                          <Text style={{ fontFamily: fonts.regular, fontSize: 10, color: colors.muted }}>{t('stats.total')}</Text>
+                          <Text style={{ fontFamily: fonts.bold, fontSize: 13, color: colors.ink }}>
+                            {fmt(totalExpenses)}
+                          </Text>
+                        </View>
+                      )}
+                    />
+                  </View>
+                )}
+                <View style={{ gap: 4 }}>
+                  {expenses.map((e) => (
+                    <Pressable
+                      key={e.category_id == null ? 'none' : e.category_id}
+                      onPress={() => goToCategory(e.category_id)}
+                      style={({ pressed }) => [
+                        styles.legendRow,
+                        styles.legendPressable,
+                        pressed && { backgroundColor: colors.surface2 },
+                      ]}
+                    >
+                      <Dot color={e.color || NO_CATEGORY_COLOR} size={9} />
                       <Text style={{ flex: 1, fontFamily: fonts.medium, fontSize: 12.5, color: colors.ink }} numberOfLines={1}>
-                        {e.name}
+                        {e.category_id == null ? t('stats.noCategory') : e.name}
                       </Text>
                       <Text style={{ fontFamily: fonts.regular, fontSize: 11, color: colors.muted }}>
                         {totalExpenses > 0 ? Math.round((e.total / totalExpenses) * 100) : 0}%
@@ -215,7 +247,8 @@ export default function StatsScreen() {
                       <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.content, minWidth: 90, textAlign: 'right' }}>
                         {fmt(e.total)}
                       </Text>
-                    </View>
+                      <Ionicons name="chevron-forward" size={14} color={colors.faint} />
+                    </Pressable>
                   ))}
                 </View>
               </>
@@ -275,6 +308,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 7,
+  },
+  legendPressable: {
+    borderRadius: 8,
+    paddingVertical: 5,
+    paddingHorizontal: 6,
+    marginHorizontal: -6,
   },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 })
