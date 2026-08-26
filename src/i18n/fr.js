@@ -32,6 +32,9 @@ export default {
   'nav.account': 'Compte',
   'nav.category': 'Catégorie',
   'nav.categoryEdit': 'Modifier la catégorie',
+  'nav.forecast': 'Simulations',
+  'nav.forecastSession': 'Simulation',
+  'nav.forecastTx': 'Transaction simulée',
   'nav.about': 'À propos',
 
   /* ------------------------------- Accueil ------------------------------- */
@@ -59,6 +62,9 @@ export default {
   'form.editTransfer': 'Modifier le transfert',
   'form.editTx': 'Modifier la transaction',
   'form.newTx': 'Nouvelle transaction',
+  'form.newForecastTx': 'Nouvelle transaction simulée',
+  'form.forecastNotice':
+    'Cette transaction reste dans la simulation : elle n’affecte aucun solde réel tant que la simulation n’est pas validée.',
   'form.account': 'Compte',
   'form.sourceAccount': 'Source (compte)',
   'form.destAccount': 'Destination (compte)',
@@ -216,6 +222,45 @@ export default {
   'categoryForm.both': 'Les deux',
   'categoryForm.color': 'Couleur',
   'categoryForm.delete': 'Supprimer la catégorie',
+
+  /* ---------------------- Simulations (prévisionnel) --------------------- */
+  'forecast.title': 'Simulations',
+  'forecast.intro':
+    'Chaque simulation est un scénario indépendant : ses transactions n’entrent dans tes soldes qu’une fois la simulation validée.',
+  'forecast.emptyTitle': 'Aucune simulation pour le moment.',
+  'forecast.emptyHint':
+    'Appuie sur + pour créer un scénario et tester une dépense ou une entrée avant de l’enregistrer pour de bon.',
+  'forecast.longPressHint': 'Appui long sur une simulation pour la supprimer.',
+  'forecast.txOne': '{n} transaction',
+  'forecast.txMany': '{n} transactions',
+  'forecast.validated': 'Validée',
+  'forecast.validatedOn': 'Validée le {date}',
+  'forecast.validatedBanner':
+    'Les transactions de cette simulation sont devenues réelles : elle est désormais en lecture seule.',
+  'forecast.createdOn': 'Créée le {date}',
+  'forecast.newSession': 'Nouvelle simulation',
+  'forecast.editSession': 'Modifier la simulation',
+  'forecast.sessionNameLabel': 'Nom de la simulation',
+  'forecast.sessionNamePlaceholder': 'ex : Achat d’un ordinateur',
+  'forecast.sessionDescription': 'Description (optionnelle)',
+  'forecast.sessionDescriptionPlaceholder': 'À quoi sert ce scénario ?',
+  'forecast.deleteTitle': 'Supprimer « {name} »',
+  'forecast.deleteMsg': 'La simulation et toutes ses transactions simulées seront supprimées. Continuer ?',
+  'forecast.net': 'Bilan simulé',
+  'forecast.txCountLabel': 'Transactions',
+  'forecast.projected': 'Soldes projetés',
+  'forecast.txSection': 'Transactions simulées',
+  'forecast.noTx': 'Aucune transaction simulée. Ajoutes-en une pour voir son effet sur tes soldes.',
+  'forecast.noTxValidated': 'Les transactions de cette simulation ont rejoint l’historique réel.',
+  'forecast.txHint': 'Appuie sur une ligne pour la modifier, appui long pour la supprimer.',
+  'forecast.addTx': 'Ajouter une transaction',
+  'forecast.validate': 'Valider la simulation',
+  'forecast.validateTitle': 'Valider la simulation',
+  'forecast.validateMsg':
+    'Les transactions simulées deviendront réelles et entreront dans tes soldes. Cette action est définitive. Continuer ?',
+  'forecast.validateConfirm': 'Valider',
+  'forecast.delete': 'Supprimer la simulation',
+  'forecast.notFound': 'Simulation introuvable.',
 
   /* ------------------------------ Sync cloud ----------------------------- */
   'sync.alertTitle': 'Synchronisation',

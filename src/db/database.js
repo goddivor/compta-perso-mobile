@@ -1,7 +1,9 @@
 // Local SQLite database (expo-sqlite, synchronous API).
 // Schema is identical to the desktop app (compta-perso) for cloud sync
-// compatibility. Forecast is not ported in v1 but its table exists and
-// every query filters forecast_session_id IS NULL.
+// compatibility. Forecast (simulation) rows live in the SAME transactions
+// table, tagged with a forecast_session_id: every "real data" query below
+// filters forecast_session_id IS NULL so a simulation never leaks into the
+// balances, the list, the stats, the report or the graph.
 import { openDatabaseSync } from 'expo-sqlite'
 
 let db = null
@@ -458,6 +460,113 @@ export function getDailyReport({ account_id, date_from, date_to } = {}) {
     GROUP BY date(t.date)
     ORDER BY day DESC
   `, params)
+}
+
+/* ------------------------------- Forecast ------------------------------ */
+// A forecast session is a "what if" scenario: its transactions carry
+// forecast_session_id = <session id> and are excluded from every real
+// query above. Validating a session turns them into real transactions
+// (forecast_session_id = NULL, is_validated = 1).
+
+export function listForecastSessions() {
+  return getDb().getAllSync(`
+    SELECT fs.*,
+      COUNT(t.id) AS tx_count,
+      COALESCE(SUM(CASE WHEN t.type='CREDIT' THEN t.amount ELSE -t.amount END), 0) AS net
+    FROM forecast_sessions fs
+    LEFT JOIN transactions t ON t.forecast_session_id = fs.id
+    GROUP BY fs.id
+    ORDER BY fs.created_at DESC, fs.id DESC
+  `)
+}
+
+export function createForecastSession({ name, description }) {
+  return getDb().runSync(
+    'INSERT INTO forecast_sessions (name, description) VALUES (?,?)',
+    [name, description || null]
+  ).lastInsertRowId
+}
+
+export function updateForecastSession({ id, name, description }) {
+  getDb().runSync(
+    'UPDATE forecast_sessions SET name=?, description=? WHERE id=?',
+    [name, description || null, id]
+  )
+}
+
+// Session row + its simulated transactions, enriched with the account and
+// (effective) category labels so the list rows render like the real ones.
+export function getForecastSession(id) {
+  const d = getDb()
+  const session = d.getFirstSync('SELECT * FROM forecast_sessions WHERE id=?', [id]) || null
+  if (!session) return { session: null, transactions: [] }
+
+  const transactions = d.getAllSync(`
+    SELECT t.*,
+      a.name AS account_name, a.color AS account_color,
+      c.name AS category_name, c.color AS category_color
+    FROM transactions t
+    LEFT JOIN transactions p ON p.id = t.transfer_pair_id
+    LEFT JOIN accounts a ON t.account_id = a.id
+    LEFT JOIN categories c ON c.id = ${EFF_CATEGORY}
+    WHERE t.forecast_session_id = ?
+    ORDER BY t.date ASC, t.created_at ASC, t.id ASC
+  `, [id])
+
+  return { session, transactions }
+}
+
+// Same amount/fees convention as createTransaction: a DEBIT stores
+// base amount + fees, a CREDIT stores the net amount received.
+export function addForecastTransaction({ session_id, account_id, date, type, amount, fees, category_id, description }) {
+  return getDb().runSync(`
+    INSERT INTO transactions
+      (account_id, date, type, amount, fees, category_id, description, forecast_session_id)
+    VALUES (?,?,?,?,?,?,?,?)
+  `, [account_id, date, type, amount, fees || 0, category_id || null, description || null, session_id]).lastInsertRowId
+}
+
+// Simulated account-to-account transfer: same pair logic as createTransfer,
+// both legs tagged with the session id.
+export function addForecastTransfer({ session_id, from_account_id, to_account_id, amount, fees, date, description }) {
+  const d = getDb()
+  let result = null
+  d.withTransactionSync(() => {
+    const totalDebit = amount + (fees || 0)
+    const r1 = d.runSync(
+      "INSERT INTO transactions (account_id,date,type,amount,fees,description,forecast_session_id) VALUES (?,?,'DEBIT',?,?,?,?)",
+      [from_account_id, date, totalDebit, fees || 0, description || null, session_id]
+    )
+    const r2 = d.runSync(
+      "INSERT INTO transactions (account_id,date,type,amount,fees,description,forecast_session_id) VALUES (?,?,'CREDIT',?,0,?,?)",
+      [to_account_id, date, amount, description || null, session_id]
+    )
+    d.runSync('UPDATE transactions SET transfer_pair_id=? WHERE id=?', [r2.lastInsertRowId, r1.lastInsertRowId])
+    d.runSync('UPDATE transactions SET transfer_pair_id=? WHERE id=?', [r1.lastInsertRowId, r2.lastInsertRowId])
+    result = { from_tx_id: r1.lastInsertRowId, to_tx_id: r2.lastInsertRowId }
+  })
+  return result
+}
+
+// The simulated transactions become real, in one SQL transaction.
+export function validateForecastSession(id) {
+  const d = getDb()
+  d.withTransactionSync(() => {
+    d.runSync('UPDATE forecast_sessions SET validated_at=CURRENT_TIMESTAMP WHERE id=?', [id])
+    d.runSync(
+      'UPDATE transactions SET is_validated=1, forecast_session_id=NULL WHERE forecast_session_id=?',
+      [id]
+    )
+  })
+}
+
+// Deleting a session discards its simulated transactions
+export function deleteForecastSession(id) {
+  const d = getDb()
+  d.withTransactionSync(() => {
+    d.runSync('DELETE FROM transactions WHERE forecast_session_id=?', [id])
+    d.runSync('DELETE FROM forecast_sessions WHERE id=?', [id])
+  })
 }
 
 /* ------------------------------ Sync dump ------------------------------ */

@@ -2,9 +2,13 @@
 // Handles simple transactions, account-to-account transfers and the four
 // edit cases: transfer->transfer, transfer->simple (delete partner),
 // simple->transfer (delete + recreate pair) and simple->simple.
+// With `route.params.sessionId` the very same form feeds a FORECAST
+// session: creation goes through addForecastTransaction/addForecastTransfer
+// so the rows carry forecast_session_id; editing and deleting keep using
+// the regular helpers, which never touch that column.
 // Fee rule: accounts.fees_rate is a fraction (0.01 = 1%); when the switch
 // is on, fees = Math.round(amount * fees_rate) and the fees field is locked.
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useState } from 'react'
 import { View, Text, ScrollView, Pressable, Switch, Alert, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import Ionicons from '@expo/vector-icons/Ionicons'
@@ -19,6 +23,8 @@ import {
   createTransfer,
   updateTransfer,
   convertTransferToSimple,
+  addForecastTransaction,
+  addForecastTransfer,
 } from '../db/database'
 import { fmt, today, isValidDay } from '../utils/format'
 import { useRefresh } from '../context/AppContext'
@@ -53,6 +59,7 @@ export default function TransactionFormScreen({ navigation, route }) {
   const { t, locale } = useI18n()
   const refresh = useRefresh()
   const txId = route.params?.id ?? null
+  const sessionId = route.params?.sessionId ?? null
 
   const [accounts, setAccounts] = useState([])
   const [categories, setCategories] = useState([])
@@ -105,6 +112,11 @@ export default function TransactionFormScreen({ navigation, route }) {
     }
   }, [txId])
 
+  // Header title: the forecast flow gets its own wording
+  useLayoutEffect(() => {
+    navigation.setOptions({ title: sessionId ? t('nav.forecastTx') : t('nav.transaction') })
+  }, [navigation, sessionId, t])
+
   const wasTransfer = !!tx?.transfer_pair_id
   const isTransfer = !!form.linked_account_id
   const baseAmount = parseFloat(form.amount) || 0
@@ -147,16 +159,18 @@ export default function TransactionFormScreen({ navigation, route }) {
 
       if (!tx) {
         if (isTransfer) {
-          createTransfer({
+          const transfer = {
             from_account_id: Number(fromAccount.id),
             to_account_id: Number(toAccount.id),
             amount: baseAmount,
             fees: feesAmt,
             date: form.date,
             description,
-          })
+          }
+          if (sessionId) addForecastTransfer({ session_id: sessionId, ...transfer })
+          else createTransfer(transfer)
         } else {
-          createTransaction({
+          const simple = {
             account_id: Number(form.account_id),
             type: form.type,
             amount: storedAmount,
@@ -164,7 +178,9 @@ export default function TransactionFormScreen({ navigation, route }) {
             category_id: catId,
             date: form.date,
             description,
-          })
+          }
+          if (sessionId) addForecastTransaction({ session_id: sessionId, ...simple })
+          else createTransaction(simple)
         }
       } else if (wasTransfer && isTransfer) {
         // Transfer -> transfer: update both sides
@@ -197,15 +213,18 @@ export default function TransactionFormScreen({ navigation, route }) {
         })
       } else if (!wasTransfer && isTransfer) {
         // Simple -> transfer: delete the old row, recreate the pair
+        // (inside the same forecast session when there is one)
         deleteTransaction(tx.id)
-        createTransfer({
+        const transfer = {
           from_account_id: Number(fromAccount.id),
           to_account_id: Number(toAccount.id),
           amount: baseAmount,
           fees: feesAmt,
           date: form.date,
           description,
-        })
+        }
+        if (sessionId) addForecastTransfer({ session_id: sessionId, ...transfer })
+        else createTransfer(transfer)
       } else {
         // Simple -> simple
         updateTransaction({
@@ -231,13 +250,25 @@ export default function TransactionFormScreen({ navigation, route }) {
     ? t('form.editTransfer')
     : tx
       ? t('form.editTx')
-      : t('form.newTx')
+      : sessionId
+        ? t('form.newForecastTx')
+        : t('form.newTx')
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={['bottom']}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
           <Text style={{ fontFamily: fonts.bold, fontSize: 20, color: colors.ink, marginBottom: 4 }}>{title}</Text>
+
+          {/* Reminder: nothing here touches the real balances yet */}
+          {sessionId ? (
+            <View style={[styles.forecastNotice, { backgroundColor: colors.warningSoft }]}>
+              <Ionicons name="flask-outline" size={16} color={colors.warning} />
+              <Text style={{ flex: 1, fontFamily: fonts.regular, fontSize: 12, color: colors.content }}>
+                {t('form.forecastNotice')}
+              </Text>
+            </View>
+          ) : null}
 
           <Field label={t('form.account')}>
             <Select
@@ -408,6 +439,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+  },
+  forecastNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    borderRadius: radius.md,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 2,
   },
   dateTrigger: {
     flexDirection: 'row',

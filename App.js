@@ -38,6 +38,8 @@ import GoogleBackupScreen from './src/screens/GoogleBackupScreen'
 import ThemeScreen from './src/screens/ThemeScreen'
 import AccountFormScreen from './src/screens/AccountFormScreen'
 import CategoryFormScreen from './src/screens/CategoryFormScreen'
+import ForecastScreen from './src/screens/ForecastScreen'
+import ForecastSessionScreen from './src/screens/ForecastSessionScreen'
 import AboutScreen from './src/screens/AboutScreen'
 import LanguageScreen from './src/screens/LanguageScreen'
 import UpdateModal from './src/components/UpdateModal'
@@ -203,6 +205,16 @@ function Root() {
           name="CategoryForm"
           component={CategoryFormScreen}
           options={{ title: t('nav.category'), ...stackHeader }}
+        />
+        <Stack.Screen
+          name="Forecast"
+          component={ForecastScreen}
+          options={{ title: t('nav.forecast'), ...stackHeader }}
+        />
+        <Stack.Screen
+          name="ForecastSession"
+          component={ForecastSessionScreen}
+          options={{ title: t('nav.forecastSession'), ...stackHeader }}
         />
         <Stack.Screen
           name="About"

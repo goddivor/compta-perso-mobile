@@ -6,6 +6,9 @@
 // slide the finger onto a bubble and release to apply the account filter.
 // Floating "+" button, tap to edit and long press to delete (confirmation
 // alert). Deleting one side of a transfer removes the pair.
+// A smaller orange button sits just above the "+": it opens the forecast
+// (simulations) screen, where scenarios are built without touching the
+// real balances.
 // Perf: deferred loading after transitions, SectionList with memoized rows
 // and stable callbacks.
 import { useCallback, useMemo, useState, useEffect, useRef } from 'react'
@@ -371,7 +374,7 @@ export default function TransactionsScreen({ navigation, route }) {
         <SectionList
           sections={sections}
           keyExtractor={keyExtractor}
-          contentContainerStyle={{ paddingBottom: 110 }}
+          contentContainerStyle={{ paddingBottom: 160 }}
           stickySectionHeadersEnabled={false}
           keyboardShouldPersistTaps="handled"
           ListEmptyComponent={<EmptyState text={t('tx.emptyFiltered')} />}
@@ -397,6 +400,19 @@ export default function TransactionsScreen({ navigation, route }) {
         ]}
       >
         <Ionicons name="add" size={30} color={colors.primaryInk} />
+      </Pressable>
+
+      {/* Secondary floating button: forecast (simulations) */}
+      <Pressable
+        onPress={() => navigation.navigate('Forecast')}
+        accessibilityLabel={t('forecast.title')}
+        style={({ pressed }) => [
+          styles.fabForecast,
+          shadowOverlay,
+          { backgroundColor: colors.warning, opacity: pressed ? 0.85 : 1 },
+        ]}
+      >
+        <Ionicons name="git-branch" size={23} color="#FFFFFF" />
       </Pressable>
 
       {/* Quick account filter fan (rendered above the list while the finger
@@ -512,6 +528,17 @@ const styles = StyleSheet.create({
     width: 58,
     height: 58,
     borderRadius: 29,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fabForecast: {
+    position: 'absolute',
+    // centred on the same axis as the main FAB, one gap above it
+    right: 25,
+    bottom: 94,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
   },
