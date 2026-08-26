@@ -1,6 +1,6 @@
 // Categories management sub-screen (from Settings): list rows with color,
-// flow and a delete action. The "+" in the navigation header opens the
-// category creation form.
+// flow, a chevron (tap the row to edit) and a delete action. The "+" in
+// the navigation header opens the category creation form.
 import { useCallback, useState } from 'react'
 import { View, Text, FlatList, Pressable, Alert, StyleSheet } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
@@ -14,7 +14,7 @@ import { EmptyState, Dot } from '../components/ui'
 
 const FLOW_KEYS = { DEBIT: 'flow.debit', CREDIT: 'flow.credit', BOTH: 'flow.both' }
 
-export default function CategoriesScreen() {
+export default function CategoriesScreen({ navigation }) {
   const { colors } = useTheme()
   const t = useT()
   const { tick, refresh } = useApp()
@@ -36,6 +36,8 @@ export default function CategoriesScreen() {
     [refresh, t]
   )
 
+  const openEdit = useCallback((c) => navigation.navigate('CategoryForm', { id: c.id }), [navigation])
+
   const keyExtractor = useCallback((c) => String(c.id), [])
   const renderItem = useCallback(
     ({ item: c, index }) => (
@@ -48,7 +50,11 @@ export default function CategoriesScreen() {
         ]}
       >
         {index > 0 ? <View style={{ height: 1, backgroundColor: colors.line, marginLeft: 16 }} /> : null}
-        <View style={styles.row}>
+        {/* Tap anywhere on the row to edit; the trash button stays separate */}
+        <Pressable
+          onPress={() => openEdit(c)}
+          style={({ pressed }) => [styles.row, pressed && { backgroundColor: colors.surface2 }]}
+        >
           <Dot color={c.color} size={12} />
           <View style={{ flex: 1, gap: 2 }}>
             <Text style={{ fontFamily: fonts.semibold, fontSize: 14, color: colors.ink }}>{c.name}</Text>
@@ -56,6 +62,7 @@ export default function CategoriesScreen() {
               {FLOW_KEYS[c.flow] ? t(FLOW_KEYS[c.flow]) : c.flow}
             </Text>
           </View>
+          <Ionicons name="chevron-forward" size={16} color={colors.faint} />
           <Pressable
             onPress={() => confirmDelete(c)}
             hitSlop={8}
@@ -63,10 +70,10 @@ export default function CategoriesScreen() {
           >
             <Ionicons name="trash-outline" size={17} color={colors.danger} />
           </Pressable>
-        </View>
+        </Pressable>
       </View>
     ),
-    [categories.length, colors, confirmDelete, t]
+    [categories.length, colors, confirmDelete, openEdit, t]
   )
 
   return (
@@ -77,6 +84,11 @@ export default function CategoriesScreen() {
         renderItem={renderItem}
         contentContainerStyle={{ paddingVertical: 16 }}
         ListEmptyComponent={<EmptyState icon="pricetags-outline" text={t('categories.empty')} />}
+        ListFooterComponent={
+          categories.length > 0 ? (
+            <Text style={[styles.hint, { color: colors.faint }]}>{t('categories.editHint')}</Text>
+          ) : null
+        }
       />
     </SafeAreaView>
   )
@@ -93,10 +105,17 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
     paddingHorizontal: 16,
     paddingVertical: 10,
     minHeight: 54,
+  },
+  hint: {
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    textAlign: 'center',
+    marginTop: 14,
+    marginHorizontal: 30,
   },
   trashBtn: {
     width: 40,

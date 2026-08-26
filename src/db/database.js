@@ -140,6 +140,17 @@ export function createCategory({ name, flow, color }) {
   ).lastInsertRowId
 }
 
+export function updateCategory({ id, name, flow, color }) {
+  getDb().runSync(
+    'UPDATE categories SET name=?, flow=?, color=? WHERE id=?',
+    [name, flow, color || '#6B7280', id]
+  )
+}
+
+export function getCategory(id) {
+  return getDb().getFirstSync('SELECT * FROM categories WHERE id=?', [id]) || null
+}
+
 export function deleteCategory(id) {
   getDb().runSync('DELETE FROM categories WHERE id=?', [id])
 }

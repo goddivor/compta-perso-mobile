@@ -31,6 +31,7 @@ export default {
   'nav.language': 'Langue',
   'nav.account': 'Compte',
   'nav.category': 'Catégorie',
+  'nav.categoryEdit': 'Modifier la catégorie',
   'nav.about': 'À propos',
 
   /* ------------------------------- Accueil ------------------------------- */
@@ -201,17 +202,20 @@ export default {
   'categories.empty': 'Aucune catégorie. Appuie sur + pour en créer une.',
   'categories.deleteTitle': 'Supprimer « {name} »',
   'categories.deleteMsg': 'Les transactions liées perdront leur catégorie. Continuer ?',
+  'categories.editHint': 'Appuie sur une catégorie pour la modifier.',
   'flow.debit': 'Débit',
   'flow.credit': 'Crédit',
   'flow.both': 'Débit et crédit',
 
   /* ------------------------- Formulaire catégorie ------------------------ */
   'categoryForm.title': 'Nouvelle catégorie',
+  'categoryForm.editTitle': 'Modifier la catégorie',
   'categoryForm.name': 'Nom',
   'categoryForm.namePlaceholder': 'ex : Internet',
   'categoryForm.flow': 'Flux',
   'categoryForm.both': 'Les deux',
   'categoryForm.color': 'Couleur',
+  'categoryForm.delete': 'Supprimer la catégorie',
 
   /* ------------------------------ Sync cloud ----------------------------- */
   'sync.alertTitle': 'Synchronisation',

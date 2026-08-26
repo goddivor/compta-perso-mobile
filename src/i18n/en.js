@@ -30,6 +30,7 @@ export default {
   'nav.language': 'Language',
   'nav.account': 'Account',
   'nav.category': 'Category',
+  'nav.categoryEdit': 'Edit category',
   'nav.about': 'About',
 
   /* -------------------------------- Home --------------------------------- */
@@ -200,17 +201,20 @@ export default {
   'categories.empty': 'No categories. Tap + to create one.',
   'categories.deleteTitle': 'Delete “{name}”',
   'categories.deleteMsg': 'Linked transactions will lose their category. Continue?',
+  'categories.editHint': 'Tap a category to edit it.',
   'flow.debit': 'Debit',
   'flow.credit': 'Credit',
   'flow.both': 'Debit and credit',
 
   /* ----------------------------- Category form --------------------------- */
   'categoryForm.title': 'New category',
+  'categoryForm.editTitle': 'Edit category',
   'categoryForm.name': 'Name',
   'categoryForm.namePlaceholder': 'e.g. Internet',
   'categoryForm.flow': 'Flow',
   'categoryForm.both': 'Both',
   'categoryForm.color': 'Color',
+  'categoryForm.delete': 'Delete category',
 
   /* ------------------------------ Cloud sync ----------------------------- */
   'sync.alertTitle': 'Sync',
