@@ -5,8 +5,6 @@ export default {
   'tx.title': 'Transactions',
   'tx.searchPlaceholder': 'Search a description',
   'tx.deleteTitle': 'Delete transaction',
-  'tx.deleteTransferMsg': 'This transaction is part of a transfer: both entries will be deleted. Continue?',
-  'tx.deleteMsg': 'This transaction will be permanently deleted. Continue?',
   'tx.transfer': 'Transfer',
   'tx.income': 'Income',
   'tx.expense': 'Expense',
@@ -25,5 +23,6 @@ export default {
   'tx.resultMany': '{n} results',
   'tx.noResult': 'No results',
   'tx.empty': 'No transactions',
+  'tx.add': 'Add a transaction',
   'tx.clear': 'Clear',
 }
