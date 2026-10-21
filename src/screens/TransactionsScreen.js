@@ -76,6 +76,11 @@ const DayCard = memo(function DayCard({ day, entries, bal, solo, accountsById, s
   const toggle = useCallback(() => setOpen((v) => !v), [])
   const withBal = showBalances && bal
   const soloAccount = solo || null
+  // "Par compte": accounts that moved first, unchanged ones last (dimmed)
+  const rows = useMemo(
+    () => (bal ? [...bal.accounts.filter((l) => l.count !== 0), ...bal.accounts.filter((l) => l.count === 0)] : []),
+    [bal]
+  )
 
   return (
     <View style={[styles.card, { backgroundColor: colors.surface }]}>
@@ -126,7 +131,7 @@ const DayCard = memo(function DayCard({ day, entries, bal, solo, accountsById, s
             <Text style={[styles.th, styles.num, { color: colors.muted }]}>{t('tx.closing')}</Text>
             <Text style={[styles.th, styles.num, { color: colors.muted }]}>{t('tx.change')}</Text>
           </View>
-          {bal.accounts.map((l) => {
+          {rows.map((l) => {
             const acc = accountsById.get(l.account_id)
             const still = l.count === 0
             return (
@@ -413,7 +418,7 @@ export default function TransactionsScreen({ navigation, route }) {
         />
       )}
 
-      <Fab onPress={addTx} />
+      <Fab onPress={addTx} accessibilityLabel={t('tx.add')} />
     </SafeAreaView>
   )
 }

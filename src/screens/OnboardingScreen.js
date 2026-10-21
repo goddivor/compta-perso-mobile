@@ -19,6 +19,34 @@ import { useCountries, useCurrencies, useOperators, searchCountries, searchOpera
 const TYPE_ORDER = { mobile_money: 0, bank: 1, fintech: 2, microfinance: 3 }
 const DEFAULT_OPERATORS = 6
 
+// Offline fallback: active ISO 4217 codes, used only when the registry's
+// currency list cannot be loaded (fresh install with no network), so a new
+// user can always pick a currency. Names come from Intl when available.
+const ISO_CODES = (
+  'AED AFN ALL AMD ANG AOA ARS AUD AWG AZN BAM BBD BDT BGN BHD BIF BMD BND BOB BRL BSD BTN BWP BYN BZD ' +
+  'CAD CDF CHF CLP CNY COP CRC CUP CVE CZK DJF DKK DOP DZD EGP ERN ETB EUR FJD FKP GBP GEL GHS GIP GMD ' +
+  'GNF GTQ GYD HKD HNL HTG HUF IDR ILS INR IQD IRR ISK JMD JOD JPY KES KGS KHR KMF KPW KRW KWD KYD KZT ' +
+  'LAK LBP LKR LRD LSL LYD MAD MDL MGA MKD MMK MNT MOP MRU MUR MVR MWK MXN MYR MZN NAD NGN NIO NOK NPR ' +
+  'NZD OMR PAB PEN PGK PHP PKR PLN PYG QAR RON RSD RUB RWF SAR SBD SCR SDG SEK SGD SHP SLE SOS SRD SSP ' +
+  'STN SVC SYP SZL THB TJS TMT TND TOP TRY TTD TWD TZS UAH UGX USD UYU UZS VES VND VUV WST XAF XCD XOF ' +
+  'XPF YER ZAR ZMW ZWL'
+).split(' ')
+
+function currencyNamer(locale) {
+  try {
+    const dn = new Intl.DisplayNames([locale], { type: 'currency' })
+    return (code) => { try { return dn.of(code) || code } catch { return code } }
+  } catch {
+    return (code) => code
+  }
+}
+
+function isoFallback() {
+  const fr = currencyNamer('fr')
+  const en = currencyNamer('en')
+  return ISO_CODES.map((code) => ({ code, name: { fr: fr(code), en: en(code) } }))
+}
+
 function phoneRegion() {
   try { return String(getLocales()[0]?.regionCode || '').toUpperCase() } catch { return '' }
 }
@@ -118,13 +146,14 @@ export default function OnboardingScreen({ navigation, route }) {
   }
 
   /* ---------------------------- step 2: currency -------------------------- */
+  const fallback = useMemo(() => (currencies.error && !currencies.data ? isoFallback() : null), [currencies.error, currencies.data])
   const currencyRows = useMemo(() => {
-    const all = currencies.data || []
+    const all = currencies.data || fallback || []
     if (!isoMode) return (country?.currencies || []).map((code) => all.find((c) => c.code === code)).filter(Boolean)
     const q = normalizeText(query).trim()
     const list = all.filter((c) => !q || normalizeText(c.code).startsWith(q) || normalizeText(c.name[lang] || c.name.en).includes(q) || normalizeText(c.name.en).includes(q))
     return list.sort((a, b) => a.code.localeCompare(b.code))
-  }, [currencies.data, country, isoMode, query, lang])
+  }, [currencies.data, fallback, country, isoMode, query, lang])
 
   const continueCurrency = () => {
     if (!currency || !save(currency)) return
@@ -149,13 +178,19 @@ export default function OnboardingScreen({ navigation, route }) {
   /* -------------------------------- render -------------------------------- */
   const title = [t('onboarding.country'), t('onboarding.currency'), t('onboarding.account')][step]
   const offline = step === 0 && !countries.data && !countries.loading && countries.error
-  const showSearch = !offline && ((step === 0) || (step === 1 && isoMode) || (step === 2 && !isoMode && iso2 && !operators.error && operators.data))
+  const showSearch = !offline && ((step === 0) || (step === 1 && isoMode && (currencies.data || fallback)) || (step === 2 && !isoMode && iso2 && !operators.error && operators.data))
   const placeholder = step === 0 ? t('onboarding.search') : step === 1 ? t('onboarding.currencySearch') : t('onboarding.accountSearch')
   const noCountry = step === 0 && !!query.trim() && countryRows.length === 0
 
   let foot = null
   if (offline) {
-    if (!withAccountStep) foot = <TextButton label={t('onboarding.later')} onPress={() => toTabs()} colors={colors} />
+    // no registry: the ISO currency list (country unknown) keeps the flow open
+    foot = (
+      <>
+        {!withAccountStep ? <TextButton label={t('onboarding.later')} onPress={() => toTabs()} colors={colors} /> : null}
+        <TonalButton label={t('onboarding.chooseCurrency')} onPress={chooseIsoCurrency} colors={colors} />
+      </>
+    )
   } else if (step === 0) {
     if (!noCountry) foot = <PrimaryButton label={t('onboarding.continue')} disabled={!country} onPress={continueCountry} colors={colors} />
   } else if (step === 1) {
@@ -231,9 +266,7 @@ export default function OnboardingScreen({ navigation, route }) {
             />
           )
         ) : step === 1 ? (
-          currencies.error && !currencies.data ? (
-            <EmptyState icon="cloud-offline-outline" title={t('common.offline')} action={{ label: t('common.retry'), onPress: currencies.retry, icon: 'refresh' }} />
-          ) : (
+          !currencies.data && !fallback ? null : (
             <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingTop: 16, paddingBottom: 110 }}>
               {currencyRows.map((cur) => {
                 const sel = currency === cur.code
@@ -315,6 +348,14 @@ function PrimaryButton({ label, onPress, disabled, colors }) {
   )
 }
 
+function TonalButton({ label, onPress, colors }) {
+  return (
+    <Pressable onPress={onPress} accessibilityRole="button" style={[styles.btn, { backgroundColor: colors.surface2 }]}>
+      <Text style={[styles.btnText, { color: colors.ink }]}>{label}</Text>
+    </Pressable>
+  )
+}
+
 function TextButton({ label, onPress, colors }) {
   return (
     <Pressable onPress={onPress} accessibilityRole="button" style={styles.btn}>
@@ -350,7 +391,7 @@ const styles = StyleSheet.create({
   empty: { fontFamily: fonts.regular, fontSize: 14, textAlign: 'center', paddingVertical: 24 },
   cash: { marginHorizontal: 16, marginTop: 12, minHeight: 64, paddingHorizontal: 16, borderRadius: 18, flexDirection: 'row', alignItems: 'center', gap: 14 },
   cashName: { flex: 1, fontFamily: fonts.medium, fontSize: 15 },
-  foot: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 16, paddingTop: 16, paddingBottom: 28, flexDirection: 'row' },
+  foot: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 16, paddingTop: 16, paddingBottom: 28, flexDirection: 'row', gap: 12 },
   btn: { flex: 1, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
   btnText: { fontFamily: fonts.semibold, fontSize: 16 },
 })

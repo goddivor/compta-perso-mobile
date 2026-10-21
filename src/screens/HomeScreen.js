@@ -103,7 +103,11 @@ export default function HomeScreen({ navigation }) {
   const openForm = useCallback(() => navigation.navigate('TransactionForm'), [navigation])
   const openAccounts = useCallback(() => navigation.navigate('AccountsList'), [navigation])
   const addAccount = useCallback(() => navigation.navigate('AccountForm'), [navigation])
-  const openAllTx = useCallback(() => navigation.navigate('TransactionsTab'), [navigation])
+  // "Tout voir" clears any account filter set earlier from an account card
+  const openAllTx = useCallback(
+    () => navigation.navigate('TransactionsTab', { accountId: null, filterStamp: Date.now() }),
+    [navigation]
+  )
 
   const renderAccount = useCallback(
     ({ item }) => <AccountCard account={item} onPress={openAccount} />,

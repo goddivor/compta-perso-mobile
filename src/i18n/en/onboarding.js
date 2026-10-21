@@ -18,7 +18,7 @@ export default {
   'onboarding.countryMissing': 'Country not available',
   'onboarding.chooseCurrency': 'Choose a currency',
   'onboarding.lockNote': 'Final after your first transaction',
-  'onboarding.accountsNote': 'The one of your {n} accounts',
-  'onboarding.accountsNoteOne': 'The one of your account',
+  'onboarding.accountsNote': 'The currency of your {n} accounts',
+  'onboarding.accountsNoteOne': 'The currency of your account',
   'onboarding.cash': 'Cash',
 }

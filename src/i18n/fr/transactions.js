@@ -5,8 +5,6 @@ export default {
   'tx.title': 'Transactions',
   'tx.searchPlaceholder': 'Rechercher une description',
   'tx.deleteTitle': 'Supprimer la transaction',
-  'tx.deleteTransferMsg': 'Cette transaction fait partie d’un transfert : les deux écritures seront supprimées. Continuer ?',
-  'tx.deleteMsg': 'Cette transaction sera définitivement supprimée. Continuer ?',
   'tx.transfer': 'Transfert',
   'tx.income': 'Entrée',
   'tx.expense': 'Dépense',
@@ -25,5 +23,6 @@ export default {
   'tx.resultMany': '{n} résultats',
   'tx.noResult': 'Aucun résultat',
   'tx.empty': 'Aucune transaction',
+  'tx.add': 'Ajouter une transaction',
   'tx.clear': 'Effacer',
 }
