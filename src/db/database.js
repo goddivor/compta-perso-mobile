@@ -4,9 +4,21 @@
 // table, tagged with a forecast_session_id: every "real data" query below
 // filters forecast_session_id IS NULL so a simulation never leaks into the
 // balances, the list, the stats, the report or the graph.
+//
+// v2 schema (additive only, the owner's data is never rewritten):
+// - profile: singleton row (id = 1) holding country_iso2 and currency
+// - accounts.operator_id / operator_dismissed: registry operator link
+// - categories.icon: Ionicons name (NULL or '' = monogram fallback)
+// - fee_rules: several suggestion rules per account (percent, fixed, tiers)
+// Columns are added after a PRAGMA table_info check; one-shot data steps
+// (fee rules from fees_rate, built-in category icons) run once, guarded by
+// PRAGMA user_version.
 import { openDatabaseSync } from 'expo-sqlite'
 
 let db = null
+
+// Current data-migration level stored in PRAGMA user_version
+const DATA_VERSION = 1
 
 export function getDb() {
   if (!db) {
@@ -15,6 +27,7 @@ export function getDb() {
     db.execSync('PRAGMA foreign_keys = ON')
     initSchema()
     seedDefaults()
+    migrateData()
   }
   return db
 }
@@ -31,7 +44,9 @@ function initSchema() {
       color TEXT DEFAULT '#3B82F6',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       position INTEGER DEFAULT 0,
-      fees_rate REAL DEFAULT NULL
+      fees_rate REAL DEFAULT NULL,
+      operator_id TEXT DEFAULT NULL,
+      operator_dismissed INTEGER DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS categories (
@@ -64,7 +79,72 @@ function initSchema() {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       fees REAL DEFAULT 0
     );
+
+    CREATE TABLE IF NOT EXISTS profile (
+      id INTEGER PRIMARY KEY CHECK(id = 1),
+      country_iso2 TEXT DEFAULT NULL,
+      currency TEXT DEFAULT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS fee_rules (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+      name TEXT,
+      kind TEXT NOT NULL CHECK(kind IN ('percent','fixed','tiers')),
+      value REAL DEFAULT NULL,
+      tiers TEXT DEFAULT NULL,
+      position INTEGER DEFAULT 0
+    );
   `)
+
+  // Databases created by an older version: add the missing columns.
+  // Only ADD COLUMN, never a drop or a rewrite (owner's data is irreplaceable).
+  addColumnIfMissing('accounts', 'position', 'INTEGER DEFAULT 0')
+  addColumnIfMissing('accounts', 'fees_rate', 'REAL DEFAULT NULL')
+  addColumnIfMissing('accounts', 'operator_id', 'TEXT DEFAULT NULL')
+  addColumnIfMissing('accounts', 'operator_dismissed', 'INTEGER DEFAULT 0')
+  addColumnIfMissing('categories', 'icon', 'TEXT')
+  addColumnIfMissing('transactions', 'fees', 'REAL DEFAULT 0')
+
+  // The profile always has its single row; currency NULL = onboarding needed
+  db.runSync('INSERT OR IGNORE INTO profile (id) VALUES (1)')
+}
+
+// Table and column names are constants of this file, never user input
+function addColumnIfMissing(table, column, decl) {
+  if (tableColumns(db, table).includes(column)) return
+  db.execSync(`ALTER TABLE ${table} ADD COLUMN ${column} ${decl}`)
+}
+
+// Ionicons name of each built-in category, keyed by the normalized name
+// (lowercase, no accents). Matches the v2 categories mockup (kit CATS).
+const BUILTIN_CATEGORY_ICONS = {
+  autres: 'ellipsis-horizontal',
+  avance: 'hourglass-outline',
+  don: 'gift-outline',
+  essence: 'speedometer-outline',
+  factures: 'receipt-outline',
+  forfaits: 'wifi-outline',
+  loisirs: 'film-outline',
+  mission: 'airplane-outline',
+  nourriture: 'restaurant-outline',
+  participation: 'people-outline',
+  perdu: 'help-circle-outline',
+  recharge: 'phone-portrait-outline',
+  reglement: 'checkmark-done-outline',
+  remboursement: 'arrow-undo-outline',
+  remuneration: 'ribbon-outline',
+  retrait: 'swap-horizontal-outline',
+  salaire: 'briefcase-outline',
+  sante: 'medkit-outline',
+  transport: 'car-outline',
+  vetements: 'shirt-outline',
+  freelance: 'laptop-outline',
+}
+
+function normalizeName(name) {
+  return String(name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase()
 }
 
 function seedDefaults() {
@@ -87,9 +167,68 @@ function seedDefaults() {
   for (const cat of cats) {
     db.runSync(
       'INSERT INTO categories (name, flow, color, icon) VALUES (?,?,?,?)',
-      [cat.name, cat.flow, cat.color, '']
+      [cat.name, cat.flow, cat.color, BUILTIN_CATEGORY_ICONS[normalizeName(cat.name)] || null]
     )
   }
+}
+
+// Built-in categories without an icon get theirs. Only empty icons are
+// filled; a category the user gave an icon keeps it.
+function backfillCategoryIcons(d) {
+  const rows = d.getAllSync("SELECT id, name FROM categories WHERE icon IS NULL OR icon = ''")
+  for (const row of rows) {
+    const icon = BUILTIN_CATEGORY_ICONS[normalizeName(row.name)]
+    if (icon) d.runSync('UPDATE categories SET icon=? WHERE id=?', [icon, row.id])
+  }
+}
+
+// Each account with a fees_rate and no fee rule gets one 'percent' rule
+// carrying that rate (same fraction: 0.01 = 1 %). fees_rate is kept.
+function backfillFeeRules(d) {
+  const rows = d.getAllSync(`
+    SELECT a.id, a.fees_rate FROM accounts a
+    WHERE a.fees_rate IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM fee_rules r WHERE r.account_id = a.id)
+  `)
+  for (const row of rows) {
+    d.runSync(
+      "INSERT INTO fee_rules (account_id, name, kind, value, tiers, position) VALUES (?, NULL, 'percent', ?, NULL, 0)",
+      [row.id, row.fees_rate]
+    )
+  }
+}
+
+// One-shot data steps, run once per database (PRAGMA user_version)
+function migrateData() {
+  const { user_version } = db.getFirstSync('PRAGMA user_version')
+  if (user_version >= DATA_VERSION) return
+  db.withTransactionSync(() => {
+    backfillFeeRules(db)
+    backfillCategoryIcons(db)
+  })
+  db.execSync(`PRAGMA user_version = ${DATA_VERSION}`)
+}
+
+/* ------------------------------- Profile ------------------------------- */
+
+// The profile row: { country_iso2, currency, created_at, missing }.
+// missing = true while no currency is set (onboarding must run).
+export function getProfile() {
+  const row = getDb().getFirstSync('SELECT country_iso2, currency, created_at FROM profile WHERE id = 1')
+    || { country_iso2: null, currency: null, created_at: null }
+  return { ...row, missing: !row.currency }
+}
+
+// Updates the profile; a field left undefined keeps its stored value.
+export function setProfile({ country_iso2, currency } = {}) {
+  const d = getDb()
+  d.runSync('INSERT OR IGNORE INTO profile (id) VALUES (1)')
+  const sets = []
+  const params = []
+  if (country_iso2 !== undefined) { sets.push('country_iso2=?'); params.push(country_iso2 || null) }
+  if (currency !== undefined) { sets.push('currency=?'); params.push(currency || null) }
+  if (sets.length) d.runSync(`UPDATE profile SET ${sets.join(', ')} WHERE id = 1`, params)
+  return getProfile()
 }
 
 /* ------------------------------ Accounts ------------------------------- */
@@ -108,21 +247,36 @@ export function listAccounts() {
   `)
 }
 
-export function createAccount({ name, type, provider, initial_balance, color, fees_rate }) {
+// operator_id (optional): registry operator id, e.g. 'tg-mixx-by-yas'
+export function createAccount({ name, type, provider, initial_balance, color, fees_rate, operator_id }) {
   const d = getDb()
   const r = d.runSync(
-    'INSERT INTO accounts (name,type,provider,initial_balance,currency,color,fees_rate) VALUES (?,?,?,?,?,?,?)',
-    [name, type, provider || null, initial_balance || 0, 'FCFA', color || '#3B82F6', fees_rate ?? null]
+    'INSERT INTO accounts (name,type,provider,initial_balance,currency,color,fees_rate,operator_id) VALUES (?,?,?,?,?,?,?,?)',
+    [name, type, provider || null, initial_balance || 0, 'FCFA', color || '#3B82F6', fees_rate ?? null, operator_id || null]
   )
   d.runSync('UPDATE accounts SET position = ? WHERE id = ?', [r.lastInsertRowId, r.lastInsertRowId])
   return r.lastInsertRowId
 }
 
-export function updateAccount({ id, name, provider, initial_balance, color, fees_rate }) {
-  getDb().runSync(
-    'UPDATE accounts SET name=?, provider=?, initial_balance=?, color=?, fees_rate=? WHERE id=?',
-    [name, provider || null, initial_balance || 0, color, fees_rate ?? null, id]
-  )
+// color, fees_rate and operator_id are optional: undefined keeps the
+// stored value (the v2 form has no colour field and edits fee rules apart).
+export function updateAccount({ id, name, provider, initial_balance, color, fees_rate, operator_id }) {
+  const sets = ['name=?', 'provider=?', 'initial_balance=?']
+  const params = [name, provider || null, initial_balance || 0]
+  if (color !== undefined) { sets.push('color=?'); params.push(color) }
+  if (fees_rate !== undefined) { sets.push('fees_rate=?'); params.push(fees_rate ?? null) }
+  if (operator_id !== undefined) { sets.push('operator_id=?'); params.push(operator_id || null) }
+  getDb().runSync(`UPDATE accounts SET ${sets.join(', ')} WHERE id=?`, [...params, id])
+}
+
+// Links an account to a registry operator (null unlinks it)
+export function setAccountOperator(id, operator_id) {
+  getDb().runSync('UPDATE accounts SET operator_id=? WHERE id=?', [operator_id || null, id])
+}
+
+// The user dismissed (✕) the operator proposal for this account
+export function dismissOperator(id) {
+  getDb().runSync('UPDATE accounts SET operator_dismissed=1 WHERE id=?', [id])
 }
 
 export function deleteAccount(id) {
@@ -135,18 +289,20 @@ export function listCategories() {
   return getDb().getAllSync('SELECT * FROM categories ORDER BY name')
 }
 
-export function createCategory({ name, flow, color }) {
+// icon (optional): Ionicons name; empty = monogram fallback
+export function createCategory({ name, flow, color, icon }) {
   return getDb().runSync(
     'INSERT INTO categories (name, flow, color, icon) VALUES (?,?,?,?)',
-    [name, flow, color || '#6B7280', '']
+    [name, flow, color || '#6B7280', icon || null]
   ).lastInsertRowId
 }
 
-export function updateCategory({ id, name, flow, color }) {
-  getDb().runSync(
-    'UPDATE categories SET name=?, flow=?, color=? WHERE id=?',
-    [name, flow, color || '#6B7280', id]
-  )
+// icon undefined keeps the stored icon; null or '' clears it
+export function updateCategory({ id, name, flow, color, icon }) {
+  const sets = ['name=?', 'flow=?', 'color=?']
+  const params = [name, flow, color || '#6B7280']
+  if (icon !== undefined) { sets.push('icon=?'); params.push(icon || null) }
+  getDb().runSync(`UPDATE categories SET ${sets.join(', ')} WHERE id=?`, [...params, id])
 }
 
 export function getCategory(id) {
@@ -155,6 +311,119 @@ export function getCategory(id) {
 
 export function deleteCategory(id) {
   getDb().runSync('DELETE FROM categories WHERE id=?', [id])
+}
+
+/* ------------------------------ Fee rules ------------------------------ */
+// Fee rules are suggestions only: the transaction form shows each rule as a
+// chip that fills the free fees field. kind:
+// - 'percent': value is a fraction of the base amount (0.01 = 1 %)
+// - 'fixed':   value is the fee itself
+// - 'tiers':   tiers = [[max, fee], …]; the first tier whose max >= base wins
+// accounts.fees_rate mirrors the account's first percent rule (desktop and
+// older clients still read it).
+
+export const FEE_RULE_KINDS = ['percent', 'fixed', 'tiers']
+
+function parseTiers(raw) {
+  if (raw == null || raw === '') return null
+  try {
+    const v = typeof raw === 'string' ? JSON.parse(raw) : raw
+    return Array.isArray(v) ? v : null
+  } catch {
+    return null
+  }
+}
+
+function feeRuleRow(row) {
+  return { ...row, tiers: parseTiers(row.tiers) }
+}
+
+// Validates and normalizes a rule's kind/value/tiers; throws on bad input
+function feeRuleFields({ kind, value, tiers }) {
+  if (!FEE_RULE_KINDS.includes(kind)) throw new Error(`Invalid fee rule kind: ${kind}`)
+  if (kind === 'tiers') {
+    const list = parseTiers(tiers)
+    const ok = list && list.length > 0 && list.every(
+      (t) => Array.isArray(t) && t.length === 2 && Number.isFinite(Number(t[0])) && Number.isFinite(Number(t[1]))
+    )
+    if (!ok) throw new Error('Invalid fee rule tiers')
+    const sorted = list.map((t) => [Number(t[0]), Number(t[1])]).sort((a, b) => a[0] - b[0])
+    return { value: null, tiers: JSON.stringify(sorted) }
+  }
+  const n = Number(value)
+  if (value == null || value === '' || !Number.isFinite(n) || n < 0) throw new Error('Invalid fee rule value')
+  return { value: n, tiers: null }
+}
+
+// accounts.fees_rate = value of the account's first percent rule, or NULL
+function syncFeesRate(d, account_id) {
+  const first = d.getFirstSync(
+    "SELECT value FROM fee_rules WHERE account_id=? AND kind='percent' ORDER BY position, id LIMIT 1",
+    [account_id]
+  )
+  d.runSync('UPDATE accounts SET fees_rate=? WHERE id=?', [first ? first.value : null, account_id])
+}
+
+// Rules of one account (or of every account when account_id is null),
+// ordered by position; tiers come back parsed as [[max, fee], …].
+export function listFeeRules(account_id = null) {
+  const rows = account_id == null
+    ? getDb().getAllSync('SELECT * FROM fee_rules ORDER BY account_id, position, id')
+    : getDb().getAllSync('SELECT * FROM fee_rules WHERE account_id=? ORDER BY position, id', [account_id])
+  return rows.map(feeRuleRow)
+}
+
+// Creates a rule at the end of the account's list; returns its id
+export function createFeeRule({ account_id, name, kind, value, tiers }) {
+  const d = getDb()
+  const f = feeRuleFields({ kind, value, tiers })
+  let id = null
+  d.withTransactionSync(() => {
+    const { p } = d.getFirstSync('SELECT COALESCE(MAX(position), -1) + 1 AS p FROM fee_rules WHERE account_id=?', [account_id])
+    id = d.runSync(
+      'INSERT INTO fee_rules (account_id, name, kind, value, tiers, position) VALUES (?,?,?,?,?,?)',
+      [account_id, name || null, kind, f.value, f.tiers, p]
+    ).lastInsertRowId
+    syncFeesRate(d, account_id)
+  })
+  return id
+}
+
+// Replaces a rule's name, kind, value and tiers (account and position kept)
+export function updateFeeRule({ id, name, kind, value, tiers }) {
+  const d = getDb()
+  const f = feeRuleFields({ kind, value, tiers })
+  d.withTransactionSync(() => {
+    d.runSync('UPDATE fee_rules SET name=?, kind=?, value=?, tiers=? WHERE id=?', [name || null, kind, f.value, f.tiers, id])
+    const row = d.getFirstSync('SELECT account_id FROM fee_rules WHERE id=?', [id])
+    if (row) syncFeesRate(d, row.account_id)
+  })
+}
+
+// Deletes one rule (the caller confirms first)
+export function deleteFeeRule(id) {
+  const d = getDb()
+  d.withTransactionSync(() => {
+    const row = d.getFirstSync('SELECT account_id FROM fee_rules WHERE id=?', [id])
+    d.runSync('DELETE FROM fee_rules WHERE id=?', [id])
+    if (row) syncFeesRate(d, row.account_id)
+  })
+}
+
+// Suggested fee of a rule for a base amount (whole FCFA), or null when the
+// rule does not apply (base above every tier, or invalid input).
+export function feeFromRule(rule, base) {
+  const b = Number(base)
+  if (!rule || !Number.isFinite(b) || b <= 0) return null
+  if (rule.kind === 'percent') return Number.isFinite(Number(rule.value)) ? Math.round(b * Number(rule.value)) : null
+  if (rule.kind === 'fixed') return Number.isFinite(Number(rule.value)) ? Math.round(Number(rule.value)) : null
+  if (rule.kind === 'tiers') {
+    const tiers = parseTiers(rule.tiers)
+    if (!tiers) return null
+    const hit = tiers.map((t) => [Number(t[0]), Number(t[1])]).sort((x, y) => x[0] - y[0]).find((t) => b <= t[0])
+    return hit ? Math.round(hit[1]) : null
+  }
+  return null
 }
 
 /* ---------------------------- Transactions ----------------------------- */
@@ -215,8 +484,8 @@ export function listTransactions(filters = {}) {
 
   return getDb().getAllSync(`
     SELECT t.*,
-      a.name AS account_name, a.color AS account_color,
-      c.name AS category_name, c.color AS category_color
+      a.name AS account_name, a.color AS account_color, a.operator_id AS account_operator_id,
+      c.name AS category_name, c.color AS category_color, c.icon AS category_icon
     FROM transactions t
     LEFT JOIN transactions p ON p.id = t.transfer_pair_id
     LEFT JOIN accounts a ON t.account_id = a.id
@@ -255,7 +524,7 @@ export function listTransactionsForGraph() {
   return getDb().getAllSync(`
     SELECT t.id, t.account_id, t.date, t.type, t.amount, t.fees, t.description,
            t.transfer_pair_id, t.created_at,
-           c.name AS category_name
+           c.name AS category_name, c.icon AS category_icon
     FROM transactions t
     LEFT JOIN categories c ON t.category_id = c.id
     WHERE t.forecast_session_id IS NULL
@@ -401,7 +670,7 @@ export function getExpensesByCategory({ account_id, date_from, date_to } = {}) {
   if (date_to) { cond.push('date(x.date)<=?'); params.push(date_to) }
 
   const rows = getDb().getAllSync(`
-    SELECT c.id AS category_id, c.name AS name, c.color AS color,
+    SELECT c.id AS category_id, c.name AS name, c.color AS color, c.icon AS icon,
            COALESCE(SUM(x.amount), 0) AS total
     FROM categories c
     LEFT JOIN ${src} x ON ${['x.eff_category_id = c.id', ...cond].join(' AND ')}
@@ -414,7 +683,7 @@ export function getExpensesByCategory({ account_id, date_from, date_to } = {}) {
     WHERE x.eff_category_id IS NULL
     ${cond.length ? 'AND ' + cond.join(' AND ') : ''}
   `, params)
-  if (none?.total > 0) rows.push({ category_id: null, name: null, color: null, total: none.total })
+  if (none?.total > 0) rows.push({ category_id: null, name: null, color: null, icon: null, total: none.total })
 
   rows.sort(
     (a, b) => b.total - a.total || String(a.name || '￿').localeCompare(String(b.name || '￿'))
@@ -462,6 +731,75 @@ export function getDailyReport({ account_id, date_from, date_to } = {}) {
   `, params)
 }
 
+/* ---------------------- Daily opening / closing ------------------------ */
+
+// Opening and closing balances of each day that has real movements, newest
+// first. Closing of day J = current balance − every movement after J;
+// opening = closing − the day's net. Real rows only (forecast excluded);
+// amounts are signed with fees included, so a transfer moves the total by
+// its fees only. Days without movement are not listed.
+//   from, to: 'YYYY-MM-DD' bounds (optional, inclusive)
+//   accountIds: only these accounts ([] or undefined = all)
+//   excludeAccountIds: drop these accounts
+// → [{ day, open, close, net, count,
+//      accounts: [{ account_id, open, close, net, count }] }]
+// Every selected account appears in `accounts`, unchanged ones with net 0.
+export function dayBalances({ from, to, accountIds, excludeAccountIds } = {}) {
+  let accounts = listAccounts()
+  if (accountIds && accountIds.length) {
+    const keep = new Set(accountIds.map(Number))
+    accounts = accounts.filter((a) => keep.has(a.id))
+  }
+  if (excludeAccountIds && excludeAccountIds.length) {
+    const drop = new Set(excludeAccountIds.map(Number))
+    accounts = accounts.filter((a) => !drop.has(a.id))
+  }
+  if (!accounts.length) return []
+
+  const ids = accounts.map((a) => a.id)
+  const where = ['forecast_session_id IS NULL', `account_id IN (${ids.map(() => '?').join(',')})`, 'date(date) IS NOT NULL']
+  const params = [...ids]
+  // Movements after `to` are needed to walk back from the current balance
+  if (from) { where.push('date(date) >= ?'); params.push(from) }
+
+  const rows = getDb().getAllSync(`
+    SELECT date(date) AS day, account_id,
+      SUM(CASE WHEN type='CREDIT' THEN amount ELSE -amount END) AS net,
+      COUNT(*) AS n
+    FROM transactions
+    WHERE ${where.join(' AND ')}
+    GROUP BY day, account_id
+    ORDER BY day DESC
+  `, params)
+
+  const byDay = new Map()
+  for (const r of rows) {
+    if (!byDay.has(r.day)) byDay.set(r.day, new Map())
+    byDay.get(r.day).set(r.account_id, r)
+  }
+
+  // Running closing balance per account, starting from today's balance
+  const running = new Map(accounts.map((a) => [a.id, a.current_balance]))
+  const out = []
+  for (const [day, perAccount] of byDay) {
+    const lines = accounts.map((a) => {
+      const r = perAccount.get(a.id)
+      const net = r ? r.net : 0
+      const close = running.get(a.id)
+      const open = close - net
+      running.set(a.id, open)
+      return { account_id: a.id, open, close, net, count: r ? r.n : 0 }
+    })
+    if (to && day > to) continue
+    const total = lines.reduce(
+      (acc, l) => ({ open: acc.open + l.open, close: acc.close + l.close, net: acc.net + l.net, count: acc.count + l.count }),
+      { open: 0, close: 0, net: 0, count: 0 }
+    )
+    out.push({ day, ...total, accounts: lines })
+  }
+  return out
+}
+
 /* ------------------------------- Forecast ------------------------------ */
 // A forecast session is a "what if" scenario: its transactions carry
 // forecast_session_id = <session id> and are excluded from every real
@@ -503,8 +841,8 @@ export function getForecastSession(id) {
 
   const transactions = d.getAllSync(`
     SELECT t.*,
-      a.name AS account_name, a.color AS account_color,
-      c.name AS category_name, c.color AS category_color
+      a.name AS account_name, a.color AS account_color, a.operator_id AS account_operator_id,
+      c.name AS category_name, c.color AS category_color, c.icon AS category_icon
     FROM transactions t
     LEFT JOIN transactions p ON p.id = t.transfer_pair_id
     LEFT JOIN accounts a ON t.account_id = a.id
@@ -571,7 +909,17 @@ export function deleteForecastSession(id) {
 
 /* ------------------------------ Sync dump ------------------------------ */
 
-export const SYNC_TABLES = ['accounts', 'categories', 'transactions', 'forecast_sessions']
+// Tables carried by a snapshot (push, pull, Drive backup). profile and
+// fee_rules are v2: an old snapshot may lack them, see restoreAllData.
+export const SYNC_TABLES = ['accounts', 'categories', 'transactions', 'forecast_sessions', 'fee_rules', 'profile']
+
+// Tables every snapshot, old or new, must carry as arrays
+const CORE_SYNC_TABLES = ['accounts', 'categories', 'transactions', 'forecast_sessions']
+
+// True when a payload is a usable snapshot (the four v1 tables are arrays)
+export function isValidSnapshot(data) {
+  return !!data && typeof data === 'object' && CORE_SYNC_TABLES.every((t) => Array.isArray(data[t]))
+}
 
 export function dumpAllData() {
   const d = getDb()
@@ -589,22 +937,43 @@ function tableColumns(d, table) {
 // Replace ALL local content with the cloud payload, keeping ids.
 // Foreign keys are disabled during the operation; only columns that exist
 // locally are inserted (tolerates schema drift).
+// Old snapshots (v1 clients, or a server without the v2 tables):
+// - no profile rows → the local profile is kept (not wiped);
+// - no fee_rules → each account with a fees_rate gets its percent rule back;
+// - built-in categories without an icon get theirs.
+// A payload without the four v1 tables throws before anything is deleted.
 export function restoreAllData(data) {
+  if (!isValidSnapshot(data)) throw new Error('Invalid snapshot: nothing restored')
   const d = getDb()
+  const payload = data
+  // A snapshot profile counts only when it carries a currency; it is
+  // always stored as the singleton row id = 1.
+  const snapProfile = Array.isArray(payload.profile) ? payload.profile.find((p) => p && p.currency) : null
+  const keepProfile = !snapProfile
   d.execSync('PRAGMA foreign_keys = OFF')
   try {
     d.withTransactionSync(() => {
-      for (const t of SYNC_TABLES) d.runSync(`DELETE FROM ${t}`)
       for (const t of SYNC_TABLES) {
-        const rows = data[t] || []
+        if (t === 'profile' && keepProfile) continue
+        d.runSync(`DELETE FROM ${t}`)
+      }
+      for (const t of SYNC_TABLES) {
+        if (t === 'profile' && keepProfile) continue
+        const rows = t === 'profile'
+          ? [{ ...snapProfile, id: 1 }]
+          : (Array.isArray(payload[t]) ? payload[t] : [])
         if (!rows.length) continue
         const cols = tableColumns(d, t)
         const usable = cols.filter((c) => c in rows[0])
+        if (!usable.length) continue
         const sql = `INSERT INTO ${t} (${usable.join(',')}) VALUES (${usable.map(() => '?').join(',')})`
         for (const row of rows) {
           d.runSync(sql, usable.map((c) => row[c] ?? null))
         }
       }
+      d.runSync('INSERT OR IGNORE INTO profile (id) VALUES (1)')
+      backfillFeeRules(d)
+      backfillCategoryIcons(d)
     })
   } finally {
     d.execSync('PRAGMA foreign_keys = ON')
