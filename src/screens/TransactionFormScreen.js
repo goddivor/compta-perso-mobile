@@ -1,21 +1,24 @@
-// Transaction create/edit form (stack screen).
-// Handles simple transactions, account-to-account transfers and the four
-// edit cases: transfer->transfer, transfer->simple (delete partner),
-// simple->transfer (delete + recreate pair) and simple->simple.
-// With `route.params.sessionId` the very same form feeds a FORECAST
-// session: creation goes through addForecastTransaction/addForecastTransfer
-// so the rows carry forecast_session_id; editing and deleting keep using
-// the regular helpers, which never touch that column.
-// Fee rule: accounts.fees_rate is a fraction (0.01 = 1%); when the switch
-// is on, fees = Math.round(amount * fees_rate) and the fees field is locked.
+// Transaction create/edit form (stack screen), v2.
+// Order: amount, type (Dépense / Entrée / Transfert), description, category,
+// account (De / Vers for a transfer), fees, date.
+// Storage is unchanged: a debit stores base + fees, a transfer is two rows
+// linked by transfer_pair_id (createTransfer / updateTransfer).
+// Editing covers transfer->transfer, transfer->simple (partner deleted),
+// simple->transfer (pair created, then the old row deleted) and simple->simple.
+// With `route.params.sessionId` the same form feeds a FORECAST session:
+// creation goes through addForecastTransaction/addForecastTransfer, editing
+// and deleting keep using the regular helpers (they never touch that column).
+// Fees are ALWAYS typed freely: the account's fee rules are only chips that
+// fill the field when tapped, nothing is applied by default.
 import { useEffect, useLayoutEffect, useMemo, useState } from 'react'
-import { View, Text, ScrollView, Pressable, Switch, Alert, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native'
+import { View, Text, TextInput, ScrollView, Pressable, Alert, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import Ionicons from '@expo/vector-icons/Ionicons'
 import { useTheme, fonts, radius } from '../theme/tokens'
 import {
   listAccounts,
   listCategories,
+  listFeeRules,
   getTransaction,
   createTransaction,
   updateTransaction,
@@ -26,27 +29,23 @@ import {
   addForecastTransaction,
   addForecastTransfer,
 } from '../db/database'
-import { fmt, today, isValidDay } from '../utils/format'
+import { fmt, fmtNumber, today, isValidDay, CURRENCY_LABEL } from '../utils/format'
+import { feeSuggestions, feeRuleLabel } from '../utils/fees'
 import { useRefresh } from '../context/AppContext'
 import { useI18n } from '../i18n'
-import { Field, Input, Select, Segmented, Button, Card } from '../components/ui'
+import { Select, Chip, LogoTile, CategoryIcon, ConfirmDialog } from '../components/v2'
 import DatePickerSheet from '../components/DatePickerSheet'
 
-// Compact long-form day label, e.g. "jeu. 17 juil. 2026"
-const fmtDayShort = (day, locale) =>
-  isValidDay(day)
-    ? new Date(day + 'T00:00:00').toLocaleDateString(locale, {
-        weekday: 'short',
-        day: 'numeric',
-        month: 'short',
-        year: 'numeric',
-      })
-    : day
+const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s)
+const digits = (v) => String(v ?? '').replace(/\D/g, '').slice(0, 12)
+const grouped = (v) => (v ? fmtNumber(Number(v)) : '')
+const NO_CATEGORY = '__none'
 
+// mode: 'DEBIT' (Dépense) | 'CREDIT' (Entrée) | 'TRANSFER' (Transfert)
 const emptyForm = {
   account_id: '',
   linked_account_id: '',
-  type: 'DEBIT',
+  mode: 'DEBIT',
   amount: '',
   fees: '',
   category_id: '',
@@ -65,8 +64,12 @@ export default function TransactionFormScreen({ navigation, route }) {
   const [categories, setCategories] = useState([])
   const [form, setForm] = useState(emptyForm)
   const [tx, setTx] = useState(null)
-  const [applyFeeRule, setApplyFeeRule] = useState(false)
+  // Edited transfer: both legs, to keep the credit leg's own category
+  const [legs, setLegs] = useState(null) // { debit, credit, shownCategory }
   const [dateOpen, setDateOpen] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [focus, setFocus] = useState(null)
+  const [busy, setBusy] = useState(false)
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }))
 
   useEffect(() => {
@@ -75,387 +78,483 @@ export default function TransactionFormScreen({ navigation, route }) {
     setCategories(listCategories())
 
     if (txId) {
-      const t = getTransaction(txId)
-      setTx(t)
-      if (!t) return
-      if (t.transfer_pair_id) {
-        const partner = getTransaction(t.transfer_pair_id)
-        const debitTx = t.type === 'DEBIT' ? t : partner
-        const creditTx = t.type === 'CREDIT' ? t : partner
+      const row = getTransaction(txId)
+      setTx(row)
+      if (!row) return
+      if (row.transfer_pair_id) {
+        const partner = getTransaction(row.transfer_pair_id)
+        const debit = row.type === 'DEBIT' ? row : partner
+        const credit = row.type === 'CREDIT' ? row : partner
+        const shownCategory = debit?.category_id ?? credit?.category_id ?? ''
+        setLegs({ debit, credit, shownCategory })
         setForm({
-          account_id: t.account_id,
-          linked_account_id: partner?.account_id ?? '',
-          type: t.type,
-          amount: String(creditTx?.amount ?? t.amount),
-          fees: debitTx?.fees ? String(debitTx.fees) : '',
-          category_id: t.category_id || '',
-          date: String(t.date || today()).slice(0, 10),
-          description: t.description || '',
+          account_id: debit?.account_id ?? row.account_id,
+          linked_account_id: credit?.account_id ?? '',
+          mode: 'TRANSFER',
+          amount: digits(Math.round(credit?.amount ?? row.amount)),
+          fees: debit?.fees ? digits(Math.round(debit.fees)) : '',
+          category_id: shownCategory,
+          date: String(row.date || today()).slice(0, 10),
+          description: row.description || '',
         })
       } else {
         setForm({
-          account_id: t.account_id,
+          account_id: row.account_id,
           linked_account_id: '',
-          type: t.type,
-          amount: String(t.type === 'DEBIT' ? t.amount - (t.fees || 0) : t.amount),
-          fees: t.fees ? String(t.fees) : '',
-          category_id: t.category_id || '',
-          date: String(t.date || today()).slice(0, 10),
-          description: t.description || '',
+          mode: row.type,
+          amount: digits(Math.round(row.type === 'DEBIT' ? row.amount - (row.fees || 0) : row.amount)),
+          fees: row.fees ? digits(Math.round(row.fees)) : '',
+          category_id: row.category_id || '',
+          date: String(row.date || today()).slice(0, 10),
+          description: row.description || '',
         })
       }
     } else {
-      setForm({
-        ...emptyForm,
-        account_id: route.params?.defaultAccountId || accs[0]?.id || '',
-      })
+      setForm({ ...emptyForm, account_id: route.params?.defaultAccountId || accs[0]?.id || '' })
     }
   }, [txId])
 
-  // Header title: the forecast flow gets its own wording
-  useLayoutEffect(() => {
-    navigation.setOptions({ title: sessionId ? t('nav.forecastTx') : t('nav.transaction') })
-  }, [navigation, sessionId, t])
-
   const wasTransfer = !!tx?.transfer_pair_id
-  const isTransfer = !!form.linked_account_id
-  const baseAmount = parseFloat(form.amount) || 0
+  const isTransfer = form.mode === 'TRANSFER'
+  const isCredit = form.mode === 'CREDIT'
 
-  const currentAccount = accounts.find((a) => String(a.id) === String(form.account_id))
-  const otherAccounts = accounts.filter((a) => String(a.id) !== String(form.account_id))
-  const linkedAccount = otherAccounts.find((a) => String(a.id) === String(form.linked_account_id))
+  useLayoutEffect(() => {
+    const title = tx
+      ? isTransfer ? t('form.editTransfer') : t('form.editTx')
+      : sessionId
+        ? isTransfer ? t('form.newForecastTransfer') : t('form.newForecastTx')
+        : isTransfer ? t('form.newTransfer') : t('form.newTx')
+    navigation.setOptions({ title })
+  }, [navigation, tx, isTransfer, sessionId, t])
 
-  const feeRate = currentAccount?.fees_rate ?? null
-  const autoFees = feeRate != null && baseAmount > 0 ? Math.round(baseAmount * feeRate) : 0
-  const feesAmt = applyFeeRule && feeRate != null ? autoFees : parseFloat(form.fees) || 0
+  const baseAmount = parseInt(form.amount, 10) || 0
+  const feesAmt = parseInt(form.fees, 10) || 0
   const totalDebit = baseAmount + feesAmt
-  const feeRatePct = feeRate != null ? Number((feeRate * 100).toFixed(2)) : null
 
-  // Transfer direction: DEBIT = current account is the source,
-  // CREDIT = current account is the destination.
-  const fromAccount = form.type === 'DEBIT' ? currentAccount : linkedAccount
-  const toAccount = form.type === 'DEBIT' ? linkedAccount : currentAccount
+  const sameId = (a, b) => String(a) === String(b)
+  const currentAccount = accounts.find((a) => sameId(a.id, form.account_id))
+  const otherAccounts = accounts.filter((a) => !sameId(a.id, form.account_id))
 
-  const valid = form.account_id && baseAmount > 0 && isValidDay(form.date)
+  // Fee rules of the account that is debited (the source, for a transfer)
+  const feeAccountId = !isCredit && form.account_id ? Number(form.account_id) : null
+  const rules = useMemo(() => (feeAccountId ? listFeeRules(feeAccountId) : []), [feeAccountId])
+  const suggestions = useMemo(() => (isCredit ? [] : feeSuggestions(rules, baseAmount)), [rules, baseAmount, isCredit])
+  // Entrée has no fees field, unless the edited row already carries some
+  const showFees = !isCredit || form.fees !== ''
 
-  useEffect(() => {
-    // Reset the fee rule switch when switching account
-    setApplyFeeRule(false)
-  }, [form.account_id])
+  const valid =
+    !!form.account_id && baseAmount > 0 && isValidDay(form.date) &&
+    (!isTransfer || (!!form.linked_account_id && !sameId(form.linked_account_id, form.account_id)))
+
+  const chooseMode = (mode) => {
+    setForm((f) => {
+      const next = { ...f, mode }
+      if (mode === 'TRANSFER') {
+        const others = accounts.filter((a) => !sameId(a.id, f.account_id))
+        if (!f.linked_account_id || sameId(f.linked_account_id, f.account_id)) next.linked_account_id = others[0]?.id ?? ''
+      } else {
+        next.linked_account_id = ''
+      }
+      return next
+    })
+  }
+
+  const chooseAccount = (id) =>
+    setForm((f) => {
+      const next = { ...f, account_id: id }
+      if (sameId(f.linked_account_id, id)) next.linked_account_id = accounts.find((a) => !sameId(a.id, id))?.id ?? ''
+      return next
+    })
+
+  const pctLabel = (value) =>
+    t('form.pct', { n: (value * 100).toLocaleString(locale, { maximumFractionDigits: 2 }) })
+  const chipLabel = (s) =>
+    `${s.rule.name || (s.rule.kind === 'percent' ? pctLabel(s.rule.value) : feeRuleLabel(s.rule))} · ${fmtNumber(s.fee)}`
+
+  const accountLeading = (a) => (
+    <LogoTile operatorId={a.operator_id} name={a.name} color={a.color} icon={a.type === 'PHYSICAL' ? 'cash-outline' : undefined} size={32} />
+  )
+  const accountOptions = (list) => list.map((a) => ({ value: a.id, label: a.name, leading: accountLeading(a) }))
 
   const categoryOptions = useMemo(
     () => [
-      { label: t('form.noCategory'), value: '' },
-      ...categories.map((c) => ({ label: c.name, value: c.id, color: c.color })),
+      { value: NO_CATEGORY, label: t('form.noCategory'), leading: <CategoryIcon icon="remove-outline" size={32} color={colors.faint} /> },
+      ...categories.map((c) => ({
+        value: c.id,
+        label: c.name,
+        leading: <CategoryIcon icon={c.icon} name={c.name} color={c.color} size={32} />,
+      })),
     ],
-    [categories, t]
+    [categories, colors.faint, t]
   )
 
   const save = () => {
+    if (!valid || busy) return
+    setBusy(true)
     try {
       const catId = form.category_id ? Number(form.category_id) : null
       const description = form.description.trim() || null
-      const storedAmount = form.type === 'DEBIT' ? totalDebit : baseAmount
+      const storedAmount = form.mode === 'DEBIT' ? totalDebit : baseAmount
+      const transfer = {
+        from_account_id: Number(form.account_id),
+        to_account_id: Number(form.linked_account_id),
+        amount: baseAmount,
+        fees: feesAmt,
+        date: form.date,
+        description,
+      }
+      // createTransfer / addForecastTransfer take no category: set it right after
+      const createPair = () => {
+        const ids = sessionId ? addForecastTransfer({ session_id: sessionId, ...transfer }) : createTransfer(transfer)
+        if (catId && ids) {
+          updateTransfer({
+            debit_tx_id: ids.from_tx_id,
+            credit_tx_id: ids.to_tx_id,
+            ...transfer,
+            category_id_debit: catId,
+            category_id_credit: null,
+          })
+        }
+      }
+      const simple = {
+        account_id: Number(form.account_id),
+        type: form.mode,
+        amount: storedAmount,
+        fees: feesAmt,
+        category_id: catId,
+        date: form.date,
+        description,
+      }
 
       if (!tx) {
-        if (isTransfer) {
-          const transfer = {
-            from_account_id: Number(fromAccount.id),
-            to_account_id: Number(toAccount.id),
-            amount: baseAmount,
-            fees: feesAmt,
-            date: form.date,
-            description,
-          }
-          if (sessionId) addForecastTransfer({ session_id: sessionId, ...transfer })
-          else createTransfer(transfer)
-        } else {
-          const simple = {
-            account_id: Number(form.account_id),
-            type: form.type,
-            amount: storedAmount,
-            fees: feesAmt,
-            category_id: catId,
-            date: form.date,
-            description,
-          }
-          if (sessionId) addForecastTransaction({ session_id: sessionId, ...simple })
-          else createTransaction(simple)
-        }
+        if (isTransfer) createPair()
+        else if (sessionId) addForecastTransaction({ session_id: sessionId, ...simple })
+        else createTransaction(simple)
       } else if (wasTransfer && isTransfer) {
-        // Transfer -> transfer: update both sides
-        const debitTxId = tx.type === 'DEBIT' ? tx.id : tx.transfer_pair_id
-        const creditTxId = tx.type === 'CREDIT' ? tx.id : tx.transfer_pair_id
+        // The category lives on the debit leg; the credit leg keeps its own,
+        // unless it was the one shown (then it moves to the debit leg)
+        const creditCat = legs?.credit?.category_id ?? null
+        const moved = legs?.debit?.category_id == null && creditCat != null && String(creditCat) === String(legs.shownCategory)
         updateTransfer({
-          debit_tx_id: debitTxId,
-          credit_tx_id: creditTxId,
-          from_account_id: Number(fromAccount.id),
-          to_account_id: Number(toAccount.id),
-          amount: baseAmount,
-          fees: feesAmt,
-          date: form.date,
-          description,
-          category_id_debit: tx.type === 'DEBIT' ? catId : null,
-          category_id_credit: tx.type === 'CREDIT' ? catId : null,
+          debit_tx_id: legs?.debit?.id ?? (tx.type === 'DEBIT' ? tx.id : tx.transfer_pair_id),
+          credit_tx_id: legs?.credit?.id ?? (tx.type === 'CREDIT' ? tx.id : tx.transfer_pair_id),
+          ...transfer,
+          category_id_debit: catId,
+          category_id_credit: moved ? null : creditCat,
         })
       } else if (wasTransfer && !isTransfer) {
-        // Transfer -> simple: delete the partner, keep this side
+        // Transfer -> simple: delete the partner, keep the opened side
         convertTransferToSimple({
           keep_tx_id: tx.id,
           delete_tx_id: tx.transfer_pair_id,
-          account_id: Number(form.account_id),
-          type: form.type,
-          amount: storedAmount,
-          fees: feesAmt,
+          account_id: simple.account_id,
+          type: simple.type,
+          amount: simple.amount,
+          fees: simple.fees,
           category_id: catId,
           date: form.date,
           description,
         })
       } else if (!wasTransfer && isTransfer) {
-        // Simple -> transfer: delete the old row, recreate the pair
-        // (inside the same forecast session when there is one)
+        // Simple -> transfer: create the pair FIRST, then drop the old row
+        createPair()
         deleteTransaction(tx.id)
-        const transfer = {
-          from_account_id: Number(fromAccount.id),
-          to_account_id: Number(toAccount.id),
-          amount: baseAmount,
-          fees: feesAmt,
-          date: form.date,
-          description,
-        }
-        if (sessionId) addForecastTransfer({ session_id: sessionId, ...transfer })
-        else createTransfer(transfer)
       } else {
-        // Simple -> simple
-        updateTransaction({
-          id: tx.id,
-          account_id: Number(form.account_id),
-          type: form.type,
-          amount: storedAmount,
-          fees: feesAmt,
-          category_id: catId,
-          date: form.date,
-          description,
-        })
+        updateTransaction({ id: tx.id, ...simple })
       }
 
       refresh()
       navigation.goBack()
     } catch (e) {
+      setBusy(false)
       Alert.alert(t('common.error'), e.message)
     }
   }
 
-  const title = wasTransfer
-    ? t('form.editTransfer')
-    : tx
-      ? t('form.editTx')
-      : sessionId
-        ? t('form.newForecastTx')
-        : t('form.newTx')
+  const remove = () => {
+    try {
+      deleteTransaction(tx.id)
+      refresh()
+      setConfirmDelete(false)
+      navigation.goBack()
+    } catch (e) {
+      setConfirmDelete(false)
+      Alert.alert(t('common.error'), e.message)
+    }
+  }
+
+  const dateLabel = isValidDay(form.date)
+    ? cap(
+        new Date(form.date + 'T00:00:00').toLocaleDateString(locale, {
+          weekday: 'long',
+          day: 'numeric',
+          month: 'long',
+          year: 'numeric',
+        })
+      )
+    : form.date
+
+  const box = (key, extra) => [
+    styles.box,
+    { backgroundColor: colors.surface, borderColor: focus === key ? colors.primary600 : colors.line, borderWidth: focus === key ? 2 : 1 },
+    extra,
+  ]
+  const label = (text) => <Text style={[styles.label, { color: colors.muted }]}>{text}</Text>
+
+  const segments = [
+    { value: 'DEBIT', label: t('common.expense') },
+    { value: 'CREDIT', label: t('common.income') },
+    { value: 'TRANSFER', label: t('common.transfer'), disabled: accounts.length < 2 },
+  ]
+
+  const deleteBody = tx
+    ? [(tx.description || '').trim(), fmt(baseAmount)].filter(Boolean).join(' · ')
+    : ''
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={['bottom']}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
-          <Text style={{ fontFamily: fonts.bold, fontSize: 20, color: colors.ink, marginBottom: 4 }}>{title}</Text>
-
-          {/* Reminder: nothing here touches the real balances yet */}
-          {sessionId ? (
-            <View style={[styles.forecastNotice, { backgroundColor: colors.warningSoft }]}>
-              <Ionicons name="flask-outline" size={16} color={colors.warning} />
-              <Text style={{ flex: 1, fontFamily: fonts.regular, fontSize: 12, color: colors.content }}>
-                {t('form.forecastNotice')}
-              </Text>
-            </View>
-          ) : null}
-
-          <Field label={t('form.account')}>
-            <Select
-              value={form.account_id}
-              onChange={(v) => set('account_id', v)}
-              options={accounts.map((a) => ({
-                label: a.name + (a.provider ? ` (${a.provider})` : ''),
-                value: a.id,
-                color: a.color,
-              }))}
-            />
-          </Field>
-
-          {form.account_id ? (
-            <Field label={form.type === 'CREDIT' ? t('form.sourceAccount') : t('form.destAccount')}>
-              <Select
-                value={form.linked_account_id}
-                onChange={(v) => set('linked_account_id', v)}
-                placeholder={t('form.externalNone')}
-                options={[
-                  { label: t('form.externalNone'), value: '' },
-                  ...otherAccounts.map((a) => ({
-                    label: a.name + (a.provider ? ` (${a.provider})` : ''),
-                    value: a.id,
-                    color: a.color,
-                  })),
-                ]}
+          {/* Amount */}
+          <View style={[styles.hero, { backgroundColor: colors.surface, borderColor: focus === 'amount' ? colors.primary600 : colors.line, borderWidth: focus === 'amount' ? 2 : 1 }]}>
+            <Text style={[styles.heroLabel, { color: colors.muted }]}>{t('form.amount')}</Text>
+            <View style={styles.heroRow}>
+              <TextInput
+                value={grouped(form.amount)}
+                onChangeText={(v) => set('amount', digits(v))}
+                onFocus={() => setFocus('amount')}
+                onBlur={() => setFocus(null)}
+                keyboardType="number-pad"
+                placeholder="0"
+                placeholderTextColor={colors.faint}
+                autoFocus={!txId}
+                selectionColor={colors.primary600}
+                accessibilityLabel={t('form.amount')}
+                style={[styles.heroInput, { color: colors.ink }]}
               />
-            </Field>
-          ) : null}
-
-          <Field label={t('form.type')}>
-            <Segmented
-              value={form.type}
-              onChange={(v) => set('type', v)}
-              segments={[
-                { label: t('form.debitExpense'), value: 'DEBIT' },
-                { label: t('form.creditIncome'), value: 'CREDIT' },
-              ]}
-            />
-          </Field>
-
-          <Field label={t('form.amount')}>
-            <Input
-              keyboardType="numeric"
-              value={form.amount}
-              onChangeText={(v) => set('amount', v.replace(',', '.'))}
-              placeholder="0"
-            />
-          </Field>
-
-          <Field label={isTransfer ? t('form.transferFees') : t('form.fees')}>
-            <Input
-              keyboardType="numeric"
-              value={applyFeeRule && feeRate != null ? String(autoFees) : form.fees}
-              onChangeText={(v) => { setApplyFeeRule(false); set('fees', v.replace(',', '.')) }}
-              placeholder="0"
-              editable={!(applyFeeRule && feeRate != null)}
-            />
-          </Field>
-
-          {feeRate != null ? (
-            <View style={styles.feeRuleRow}>
-              <Switch
-                value={applyFeeRule}
-                onValueChange={setApplyFeeRule}
-                trackColor={{ false: colors.line, true: colors.primary }}
-                thumbColor={applyFeeRule ? colors.primaryInk : colors.surface}
-              />
-              <Text style={{ flex: 1, fontFamily: fonts.regular, fontSize: 12, color: colors.muted }}>
-                {t('form.applyFeeRule')}
-                <Text style={{ fontFamily: fonts.semibold, color: colors.warning }}>{feeRatePct}%</Text>
-                {baseAmount > 0 ? (
-                  <Text style={{ color: colors.faint }}>  → {fmt(autoFees)}</Text>
-                ) : null}
-              </Text>
+              <Text style={[styles.heroCur, { color: colors.muted }]}>{CURRENCY_LABEL}</Text>
             </View>
-          ) : null}
+          </View>
 
-          {feesAmt > 0 && baseAmount > 0 && form.type === 'DEBIT' && !isTransfer ? (
-            <Text style={{ fontFamily: fonts.regular, fontSize: 12, color: colors.muted }}>
-              {t('form.totalDebited')}<Text style={{ fontFamily: fonts.semibold, color: colors.danger }}>{fmt(totalDebit)}</Text>
-              <Text style={{ color: colors.faint }}>{t('form.inclFeesDetail', { amount: fmt(feesAmt) })}</Text>
-            </Text>
-          ) : null}
+          {/* Type */}
+          <View style={styles.segs}>
+            {segments.map((s, i) => {
+              const on = form.mode === s.value
+              return (
+                <Pressable
+                  key={s.value}
+                  onPress={() => chooseMode(s.value)}
+                  disabled={s.disabled}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: on, disabled: !!s.disabled }}
+                  style={[
+                    styles.seg,
+                    {
+                      backgroundColor: on ? colors.primarySoft : 'transparent',
+                      borderColor: colors.line,
+                      borderLeftWidth: i === 0 ? 1 : 0,
+                      borderTopLeftRadius: i === 0 ? radius.pill : 0,
+                      borderBottomLeftRadius: i === 0 ? radius.pill : 0,
+                      borderTopRightRadius: i === 2 ? radius.pill : 0,
+                      borderBottomRightRadius: i === 2 ? radius.pill : 0,
+                      opacity: s.disabled ? 0.45 : 1,
+                    },
+                  ]}
+                >
+                  {on ? <Ionicons name="checkmark" size={16} color={colors.ink} /> : null}
+                  <Text style={{ fontFamily: on ? fonts.semibold : fonts.medium, fontSize: 14, color: on ? colors.ink : colors.content }}>
+                    {s.label}
+                  </Text>
+                </Pressable>
+              )
+            })}
+          </View>
 
-          {/* Transfer preview */}
-          {isTransfer && baseAmount > 0 && fromAccount && toAccount ? (
-            <Card style={{ padding: 14, gap: 6, backgroundColor: colors.surface2 }}>
-              <View style={styles.previewRow}>
-                <Ionicons name="arrow-up-circle-outline" size={16} color={colors.danger} />
-                <Text style={{ flex: 1, fontFamily: fonts.regular, fontSize: 13, color: colors.content }}>
-                  {t('form.debit')}<Text style={{ fontFamily: fonts.semibold, color: fromAccount.color }}>{fromAccount.name}</Text>
-                </Text>
-                <Text style={{ fontFamily: fonts.bold, fontSize: 13, color: colors.danger }}>-{fmt(totalDebit)}</Text>
-              </View>
-              {feesAmt > 0 ? (
-                <Text style={{ fontFamily: fonts.regular, fontSize: 11, color: colors.faint, marginLeft: 24 }}>
-                  {t('form.inclFeesShort', { amount: fmt(feesAmt) })}
-                </Text>
-              ) : null}
-              <View style={styles.previewRow}>
-                <Ionicons name="arrow-down-circle-outline" size={16} color={colors.success} />
-                <Text style={{ flex: 1, fontFamily: fonts.regular, fontSize: 13, color: colors.content }}>
-                  {t('form.credit')}<Text style={{ fontFamily: fonts.semibold, color: toAccount.color }}>{toAccount.name}</Text>
-                </Text>
-                <Text style={{ fontFamily: fonts.bold, fontSize: 13, color: colors.success }}>+{fmt(baseAmount)}</Text>
-              </View>
-            </Card>
-          ) : null}
-
-          <Field label={t('form.date')}>
-            <Pressable
-              onPress={() => setDateOpen(true)}
-              style={[styles.dateTrigger, { backgroundColor: colors.surface, borderColor: colors.line }]}
-            >
-              <Ionicons name="calendar-outline" size={17} color={colors.muted} />
-              <Text style={{ flex: 1, fontFamily: fonts.medium, fontSize: 14, color: colors.ink }}>
-                {fmtDayShort(form.date, locale)}
-              </Text>
-              <Ionicons name="chevron-down" size={16} color={colors.muted} />
-            </Pressable>
-          </Field>
-
-          <DatePickerSheet
-            visible={dateOpen}
-            date={form.date}
-            onClose={() => setDateOpen(false)}
-            onSelect={(d) => { set('date', d); setDateOpen(false) }}
-          />
-
-          <Field label={t('form.category')}>
-            <Select value={form.category_id} onChange={(v) => set('category_id', v)} options={categoryOptions} placeholder={t('form.noCategory')} />
-          </Field>
-
-          <Field label={t('form.description')}>
-            <Input multiline value={form.description} onChangeText={(v) => set('description', v)} placeholder={t('form.optional')} />
-          </Field>
-
-          <View style={{ flexDirection: 'row', gap: 10, marginTop: 8 }}>
-            <Button title={t('common.cancel')} variant="secondary" onPress={() => navigation.goBack()} style={{ flex: 1 }} />
-            <Button
-              title={isTransfer ? (tx ? t('form.editTransfer') : t('form.createTransfer')) : t('common.save')}
-              onPress={save}
-              disabled={!valid}
-              style={{ flex: 1.4 }}
+          {/* Description */}
+          <View>
+            {label(t('form.description'))}
+            <TextInput
+              value={form.description}
+              onChangeText={(v) => set('description', v)}
+              onFocus={() => setFocus('description')}
+              onBlur={() => setFocus(null)}
+              multiline
+              placeholder={t('form.descriptionPh')}
+              placeholderTextColor={colors.faint}
+              selectionColor={colors.primary600}
+              style={[box('description'), styles.desc, { color: colors.ink }]}
             />
           </View>
+
+          {/* Category */}
+          <Select
+            label={t('form.category')}
+            value={form.category_id ? form.category_id : undefined}
+            options={categoryOptions}
+            onChange={(v) => set('category_id', v === NO_CATEGORY ? '' : v)}
+            placeholderLeading={<CategoryIcon icon="pricetag-outline" size={32} color={colors.faint} />}
+          />
+
+          {/* Account(s) */}
+          {isTransfer ? (
+            <>
+              <Select
+                label={t('form.from')}
+                value={form.account_id}
+                options={accountOptions(accounts)}
+                onChange={chooseAccount}
+              />
+              <Select
+                label={t('form.to')}
+                value={form.linked_account_id}
+                options={accountOptions(otherAccounts)}
+                onChange={(v) => set('linked_account_id', v)}
+              />
+            </>
+          ) : (
+            <Select
+              label={t('form.account')}
+              value={form.account_id}
+              options={accountOptions(accounts)}
+              onChange={chooseAccount}
+              placeholderLeading={currentAccount ? accountLeading(currentAccount) : undefined}
+            />
+          )}
+
+          {/* Fees: always free; the rules only suggest */}
+          {showFees ? (
+            <View>
+              {label(t('form.fees'))}
+              <View style={box('fees', styles.feesBox)}>
+                <TextInput
+                  value={grouped(form.fees)}
+                  onChangeText={(v) => set('fees', digits(v))}
+                  onFocus={() => setFocus('fees')}
+                  onBlur={() => setFocus(null)}
+                  keyboardType="number-pad"
+                  placeholder="0"
+                  placeholderTextColor={colors.faint}
+                  selectionColor={colors.primary600}
+                  accessibilityLabel={t('form.fees')}
+                  style={[styles.feesInput, { color: colors.ink }]}
+                />
+                {feesAmt > 0 && baseAmount > 0 && !isCredit ? (
+                  <Text numberOfLines={1} style={[styles.debited, { color: colors.muted }]}>
+                    {t('form.debited', { amount: fmtNumber(totalDebit) })}
+                  </Text>
+                ) : null}
+                <Text style={[styles.cur, { color: colors.muted }]}>{CURRENCY_LABEL}</Text>
+              </View>
+              {suggestions.length ? (
+                <View style={styles.chips}>
+                  {suggestions.map((s) => {
+                    const on = form.fees !== '' && feesAmt === s.fee
+                    return (
+                      <Chip
+                        key={s.rule.id}
+                        label={chipLabel(s)}
+                        selected={on}
+                        onPress={() => set('fees', on ? '' : digits(s.fee))}
+                      />
+                    )
+                  })}
+                </View>
+              ) : null}
+            </View>
+          ) : null}
+
+          {/* Date (not shown behind the keyboard: it opens a sheet) */}
+          <View>
+            {label(t('form.date'))}
+            <Pressable
+              onPress={() => setDateOpen(true)}
+              accessibilityRole="button"
+              accessibilityLabel={t('form.date')}
+              style={[styles.box, styles.dateBox, { backgroundColor: colors.surface, borderColor: colors.line, borderWidth: 1 }]}
+            >
+              <Ionicons name="calendar-outline" size={22} color={colors.muted} />
+              <Text numberOfLines={1} style={[styles.dateText, { color: colors.ink }]}>{dateLabel}</Text>
+              <Ionicons name="chevron-down" size={22} color={colors.muted} />
+            </Pressable>
+          </View>
         </ScrollView>
+
+        {/* Footer */}
+        <View style={[styles.foot, { backgroundColor: colors.bg, borderTopColor: colors.line }]}>
+          {tx ? (
+            <Pressable
+              onPress={() => setConfirmDelete(true)}
+              accessibilityRole="button"
+              style={({ pressed }) => [styles.footBtn, styles.footDanger, { backgroundColor: colors.dangerSoft, opacity: pressed ? 0.85 : 1 }]}
+            >
+              <Ionicons name="trash-outline" size={18} color={colors.danger} />
+              <Text style={[styles.footText, { color: colors.danger }]}>{t('common.delete')}</Text>
+            </Pressable>
+          ) : (
+            <Pressable
+              onPress={() => navigation.goBack()}
+              accessibilityRole="button"
+              style={({ pressed }) => [styles.footBtn, { backgroundColor: pressed ? colors.surface2 : 'transparent' }]}
+            >
+              <Text style={[styles.footText, { color: colors.ink }]}>{t('common.cancel')}</Text>
+            </Pressable>
+          )}
+          <Pressable
+            onPress={save}
+            disabled={!valid || busy}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: !valid }}
+            style={({ pressed }) => [
+              styles.footBtn,
+              styles.footPrimary,
+              { backgroundColor: valid ? (pressed ? colors.primary600 : colors.primary) : colors.surface2 },
+            ]}
+          >
+            <Text style={[styles.footText, { color: valid ? colors.primaryInk : colors.faint }]}>{t('common.save')}</Text>
+          </Pressable>
+        </View>
       </KeyboardAvoidingView>
+
+      <DatePickerSheet
+        visible={dateOpen}
+        date={form.date}
+        onClose={() => setDateOpen(false)}
+        onSelect={(d) => { set('date', d); setDateOpen(false) }}
+      />
+
+      <ConfirmDialog
+        visible={confirmDelete}
+        title={isTransfer && wasTransfer ? t('form.deleteTransfer') : t('form.deleteTx')}
+        body={deleteBody}
+        onConfirm={remove}
+        onCancel={() => setConfirmDelete(false)}
+      />
     </SafeAreaView>
   )
 }
 
 const styles = StyleSheet.create({
-  body: {
-    padding: 20,
-    gap: 16,
-    paddingBottom: 40,
-  },
-  feeRuleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginTop: -6,
-  },
-  previewRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  forecastNotice: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 9,
-    borderRadius: radius.md,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    marginBottom: 2,
-  },
-  dateTrigger: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    minHeight: 48,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    paddingHorizontal: 14,
-  },
+  body: { padding: 16, gap: 16, paddingBottom: 24 },
+  label: { fontFamily: fonts.medium, fontSize: 13, marginLeft: 4, marginBottom: 6 },
+  hero: { borderRadius: radius.xxl, paddingHorizontal: 20, paddingTop: 14, paddingBottom: 10 },
+  heroLabel: { fontFamily: fonts.medium, fontSize: 13 },
+  heroRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  heroInput: { flex: 1, fontFamily: fonts.bold, fontSize: 40, paddingVertical: 4, paddingHorizontal: 0 },
+  heroCur: { fontFamily: fonts.medium, fontSize: 16 },
+  segs: { flexDirection: 'row' },
+  seg: { flex: 1, height: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderTopWidth: 1, borderBottomWidth: 1, borderRightWidth: 1 },
+  box: { minHeight: 56, borderRadius: 14, paddingHorizontal: 15 },
+  desc: { height: 104, paddingTop: 14, paddingBottom: 14, fontFamily: fonts.regular, fontSize: 16, textAlignVertical: 'top' },
+  feesBox: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  feesInput: { flex: 1, minWidth: 0, fontFamily: fonts.medium, fontSize: 16, paddingVertical: 0 },
+  debited: { flexShrink: 1, fontFamily: fonts.regular, fontSize: 13 },
+  cur: { fontFamily: fonts.medium, fontSize: 14 },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
+  dateBox: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16 },
+  dateText: { flex: 1, fontFamily: fonts.medium, fontSize: 16 },
+  foot: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingHorizontal: 16, paddingVertical: 12, borderTopWidth: StyleSheet.hairlineWidth },
+  footBtn: { height: 48, paddingHorizontal: 20, borderRadius: 24, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  footDanger: { paddingHorizontal: 18 },
+  footPrimary: { flex: 1, maxWidth: 220 },
+  footText: { fontFamily: fonts.semibold, fontSize: 15 },
 })
