@@ -22,6 +22,16 @@ export function shortDateTime(value) {
   return `${day}, ${time}`
 }
 
+// "19 juil. 2026, 08:36"
+export function mediumDateTime(value) {
+  const d = value ? new Date(value) : null
+  if (!d || isNaN(d.getTime())) return ''
+  const locale = getFormatLocale()
+  const day = d.toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' })
+  const time = d.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', hour12: false })
+  return `${day}, ${time}`
+}
+
 // "6 oct. 2026 à 05:49"
 export function longDateTime(value) {
   const d = value ? new Date(value) : null
@@ -32,13 +42,15 @@ export function longDateTime(value) {
   return t('settings.dateAt', { date: day, time })
 }
 
-// A titled group: small heading above a rounded card
+// A titled group: small heading above a rounded card (no card when empty)
 export function SectionCard({ title, children, style }) {
   const { colors } = useTheme()
   return (
     <View style={[{ gap: 8 }, style]}>
       {title ? <Text style={[styles.sectionTitle, { color: colors.muted }]}>{title}</Text> : null}
-      <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.line }]}>{children}</View>
+      {children ? (
+        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.line }]}>{children}</View>
+      ) : null}
     </View>
   )
 }
@@ -69,6 +81,7 @@ export const SettingsRow = memo(function SettingsRow({
   tone,
   loading = false,
   disabled = false,
+  wrap = false, // let the title and subtitle wrap (e.g. an e-mail address)
 }) {
   const { colors } = useTheme()
   const danger = tone === 'danger'
@@ -81,11 +94,11 @@ export const SettingsRow = memo(function SettingsRow({
     >
       {leading || <Tile icon={icon} tone={tone} />}
       <View style={{ flex: 1, gap: 1 }}>
-        <Text numberOfLines={1} style={{ fontFamily: fonts.medium, fontSize: 15, color: danger ? colors.danger : colors.ink }}>
+        <Text numberOfLines={wrap ? undefined : 1} style={{ fontFamily: fonts.medium, fontSize: 15, color: danger ? colors.danger : colors.ink }}>
           {title}
         </Text>
         {subtitle ? (
-          <Text numberOfLines={1} style={{ fontFamily: fonts.regular, fontSize: 12.5, color: colors.muted }}>
+          <Text numberOfLines={wrap ? undefined : 1} style={{ fontFamily: fonts.regular, fontSize: 12.5, color: colors.muted }}>
             {subtitle}
           </Text>
         ) : null}
