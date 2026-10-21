@@ -1,0 +1,62 @@
+// English strings, area "common". Flat `screen.key` keys, {x} interpolation.
+// Only the unit owning this area edits this file (and its twin fr/common.js).
+export default {
+  /* ------------------------------ Common -------------------------------- */
+  'common.cancel': 'Cancel',
+  'common.delete': 'Delete',
+  'common.save': 'Save',
+  'common.validate': 'Confirm',
+  'common.error': 'Error',
+  'common.reset': 'Reset',
+  'common.choose': '— Select —',
+  'common.electronic': 'Electronic',
+  'common.cash': 'Cash',
+
+  /* ----------------------------- App / root ------------------------------ */
+  'app.dbError': 'Database error: {message}',
+
+  /* ----------------------------- Tabs / titles --------------------------- */
+  'tabs.home': 'Home',
+  'tabs.transactions': 'Transactions',
+  'tabs.stats': 'Stats',
+  'tabs.report': 'Report',
+  'tabs.settings': 'Settings',
+  'nav.transaction': 'Transaction',
+  'nav.filter': 'Search',
+  'nav.accounts': 'Accounts',
+  'nav.categories': 'Categories',
+  'nav.sync': 'Cloud sync',
+  'nav.googleBackup': 'Google backup',
+  'nav.theme': 'Theme',
+  'nav.language': 'Language',
+  'nav.account': 'Account',
+  'nav.category': 'Category',
+  'nav.categoryEdit': 'Edit category',
+  'nav.forecast': 'Simulations',
+  'nav.forecastSession': 'Simulation',
+  'nav.forecastTx': 'Simulated transaction',
+  'nav.about': 'About',
+  'period.7d': '7 d',
+  'period.30d': '30 d',
+  'period.month': 'Month',
+  'period.all': 'All',
+  'flow.debit': 'Debit',
+  'flow.credit': 'Credit',
+  'flow.both': 'Debit and credit',
+
+  /* -------------------------------- Updater ------------------------------ */
+  'updater.title': 'Update available (v{v})',
+  'updater.message': 'A new version of Compta Perso is available. Do you want to download it?',
+  'updater.later': 'Later',
+  'updater.download': 'Download',
+  'update.title': 'New version v{v}',
+  'update.notes': "What's new",
+  'update.noNotes': 'No release notes available.',
+  'update.downloadInstall': 'Download and install',
+  'update.later': 'Later',
+  'update.downloading': 'Downloading… {pct}%',
+  'update.installing': 'Opening the Android installer…',
+  'update.installHint': 'Android may ask you to allow the app to install unknown apps.',
+  'update.errDownload': 'Download failed. Check your internet connection.',
+  'update.errInstall': 'The installer could not start. Opening the download page…',
+}
