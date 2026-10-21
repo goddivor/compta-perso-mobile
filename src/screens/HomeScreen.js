@@ -203,6 +203,9 @@ export default function HomeScreen({ navigation }) {
         renderItem={renderAccount}
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.accsContent}
+        // The footer wrapper is a column View: make it a row so the tile
+        // stretches to the account cards' height like a regular cell does
+        ListFooterComponentStyle={styles.accAddCell}
         ListFooterComponent={
           <Pressable onPress={addAccount} accessibilityRole="button" style={[styles.acc, styles.accAdd, { borderColor: colors.line }]}>
             <Ionicons name="add" size={26} color={colors.content} />
@@ -249,7 +252,9 @@ const styles = StyleSheet.create({
   accsContent: { paddingHorizontal: 16, gap: 10 },
   acc: { width: 148, paddingTop: 16, paddingBottom: 14, paddingHorizontal: 12, borderRadius: 18, alignItems: 'center', gap: 8 },
   accName: { fontFamily: fonts.semibold, fontSize: 14, textAlign: 'center' },
-  accAdd: { width: 96, marginLeft: 10, justifyContent: 'center', borderWidth: 1.5, gap: 4 },
+  // Same footprint as an account card (the owner's v2.0.0 review)
+  accAddCell: { flexDirection: 'row' },
+  accAdd: { justifyContent: 'center', borderWidth: 1.5, gap: 4 },
   accAddText: { fontFamily: fonts.semibold, fontSize: 13, textAlign: 'center' },
   latestWrap: { marginHorizontal: 16, overflow: 'hidden' },
   latestFirst: { borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl },
