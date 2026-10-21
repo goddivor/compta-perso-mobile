@@ -56,7 +56,6 @@ export default {
   'update.later': 'Plus tard',
   'update.downloading': 'Téléchargement en cours… {pct} %',
   'update.installing': 'Ouverture de l’installateur Android…',
-  'update.installHint': 'Android peut demander d’autoriser l’application à installer des applications inconnues.',
   'update.errDownload': 'Le téléchargement a échoué. Vérifie ta connexion internet.',
   'update.errInstall': 'L’installation n’a pas pu démarrer. Ouverture de la page de téléchargement…',
 

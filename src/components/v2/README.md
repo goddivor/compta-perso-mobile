@@ -7,7 +7,7 @@ Text comes from `common.*` keys only, so screen units never need these files.
 | Component | Props | Notes |
 |---|---|---|
 | `Fab` | `onPress`, `icon = 'add'`, `accessibilityLabel`, `style` | 56 dp, radius 16, bottom-right 16. The only way to add. |
-| `EmptyState` | `icon`, `title`, `action?: { label, onPress, icon?, variant?: 'primary' \| 'tonal' }`, `style` | Centred in the free space, above the keyboard. In a FlatList: `ListEmptyComponent` + `contentContainerStyle={{ flexGrow: 1 }}`. |
+| `EmptyState` | `icon`, `title`, `action?: { label, onPress, icon?, variant?: 'primary' \| 'tonal', busy? }`, `style` | Centred in the free space, above the keyboard. `action.busy`: spinner in place of the icon, button disabled. In a FlatList: `ListEmptyComponent` + `contentContainerStyle={{ flexGrow: 1 }}`. |
 | `LogoTile` | `operatorId`, `name`, `color`, `icon`, `size = 40`, `style` | Registry logo on the white tile (fills it when drawn on its own coloured block). No logo: `icon` (e.g. `'cash-outline'` for a PHYSICAL account) or the initial of `name`, in `color`. |
 | `CategoryIcon` | `icon`, `name`, `color`, `size = 40`, `transfer = false`, `style` | Circle, Ionicons `icon` or the initial of `name`. `transfer` = blue swap avatar. |
 | `Amount` | `value`, `type?: 'DEBIT' \| 'CREDIT'`, `size = 15`, `weight = 'semibold'`, `currency = true`, `color`, `style`, `numberOfLines = 1` | Debit red "−", credit green "+", no type = balance in ink. Masked when the user hides amounts. |

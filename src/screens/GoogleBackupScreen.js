@@ -150,7 +150,7 @@ export default function GoogleBackupScreen() {
         <EmptyState
           icon="logo-google"
           title={t('backup.signedOut')}
-          action={{ label: t('backup.signIn'), onPress: busy ? undefined : doSignIn, icon: 'logo-google' }}
+          action={{ label: t('backup.signIn'), onPress: busy ? undefined : doSignIn, icon: 'logo-google', busy: busy === 'signin' }}
         />
         {error ? <ErrorBox text={error} /> : null}
       </SafeAreaView>

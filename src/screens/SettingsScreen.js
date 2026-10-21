@@ -1,6 +1,7 @@
 // Settings hub (v2): Profil / Données / Préférences / À propos. Monochrome
 // icons on neutral tiles; sub-titles are data only (count, date, address,
-// version). The country row is fixed: flag, country, currency, no action.
+// version). The country row is fixed: flag, country, currency, no action;
+// without a country it still shows the currency (no flag).
 import { useEffect, useState } from 'react'
 import { View, Text, ScrollView } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
@@ -60,6 +61,11 @@ export default function SettingsScreen({ navigation }) {
               title={countryName}
               subtitle={currencyName}
             />
+          </SectionCard>
+        ) : profile.currency ? (
+          // Offline onboarding fallback: currency known, country unknown
+          <SectionCard title={t('settings.sectionProfile')}>
+            <SettingsRow icon="cash-outline" title={currencyName} />
           </SectionCard>
         ) : null}
 
