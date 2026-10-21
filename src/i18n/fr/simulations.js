@@ -1,0 +1,32 @@
+// French strings (reference language), area "simulations". Flat `screen.key` keys, {x} interpolation.
+// Only the unit owning this area edits this file (and its twin en/simulations.js).
+export default {
+  /* ---------------------- Simulations (prévisionnel) --------------------- */
+  'forecast.title': 'Simulations',
+  'forecast.empty': 'Aucune simulation',
+  'forecast.confirmedSection': 'Confirmées',
+  'forecast.inProgress': 'En cours',
+  'forecast.confirmed': 'Confirmée',
+  'forecast.createdOn': 'Créée le {date}',
+  'forecast.createdConfirmedOn': 'Créée le {date} · confirmée le {confirmed}',
+  'forecast.newSession': 'Nouvelle simulation',
+  'forecast.editSession': 'Modifier la simulation',
+  'forecast.sessionNameLabel': 'Nom',
+  'forecast.sessionDescription': 'Description',
+  'forecast.net': 'Net simulé',
+  'forecast.opOne': 'opération',
+  'forecast.opMany': 'opérations',
+  'forecast.projected': 'Soldes projetés',
+  'forecast.currentBalance': 'Solde actuel {amount}',
+  'forecast.txSection': 'Opérations simulées',
+  'forecast.opsSection': 'Opérations',
+  'forecast.viewTransactions': 'Voir dans les transactions',
+  'forecast.addTx': 'Ajouter une opération',
+  'forecast.validate': 'Confirmer la simulation',
+  'forecast.validateTitle': 'Confirmer la simulation ?',
+  'forecast.validateLine': '{name} : {from} → {to}',
+  'forecast.validateConfirm': 'Confirmer',
+  'forecast.delete': 'Supprimer la simulation',
+  'forecast.deleteTitle': 'Supprimer la simulation ?',
+  'forecast.notFound': 'Simulation introuvable',
+}

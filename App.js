@@ -2,8 +2,11 @@
 // navigation tree (bottom tabs + native stack for the form screens).
 // Theme: ThemeProvider (system / forced light / forced dark, persisted).
 // Perf: tabs are lazy and frozen when blurred; inactive screens detached.
+// Onboarding gate: while the profile has no currency, the Onboarding route
+// opens on top of the tabs at launch (owner's upgraded data included); the
+// update sheet and the Drive auto-backup wait until the profile is complete.
 import { useEffect, useState } from 'react'
-import { View, Text, Pressable, ActivityIndicator, useColorScheme } from 'react-native'
+import { View, Text, ActivityIndicator, useColorScheme } from 'react-native'
 import { StatusBar } from 'expo-status-bar'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/native'
@@ -21,9 +24,10 @@ import {
 
 import { ThemeProvider, useTheme, fonts, palettes } from './src/theme/tokens'
 import { I18nProvider, useT, t } from './src/i18n'
-import { getDb } from './src/db/database'
+import { getDb, getProfile, listAccounts } from './src/db/database'
 import { AppProvider } from './src/context/AppContext'
 import { FiltersProvider } from './src/context/FiltersContext'
+import { PrivacyProvider } from './src/context/PrivacyContext'
 import FilterScreen from './src/screens/FilterScreen'
 import HomeScreen from './src/screens/HomeScreen'
 import TransactionsScreen from './src/screens/TransactionsScreen'
@@ -42,6 +46,8 @@ import ForecastScreen from './src/screens/ForecastScreen'
 import ForecastSessionScreen from './src/screens/ForecastSessionScreen'
 import AboutScreen from './src/screens/AboutScreen'
 import LanguageScreen from './src/screens/LanguageScreen'
+import OnboardingScreen from './src/screens/OnboardingScreen'
+import FeeRuleFormScreen from './src/screens/FeeRuleFormScreen'
 import UpdateModal from './src/components/UpdateModal'
 import { getStartupUpdate, dismissUpdateVersion } from './src/updates/updater'
 import { maybeAutoBackup } from './src/backup/googleDrive'
@@ -89,15 +95,51 @@ function Tabs() {
   )
 }
 
+// Launch route stack: the tabs, plus Onboarding on top when the profile has
+// no currency (2 steps when accounts exist, 3 with the account step)
+function launchState() {
+  try {
+    if (!getProfile().missing) return undefined
+    const withAccountStep = listAccounts().length === 0
+    return { index: 1, routes: [{ name: 'Tabs' }, { name: 'Onboarding', params: { withAccountStep } }] }
+  } catch (e) {
+    console.warn('onboarding gate: profile read failed', e)
+    return undefined
+  }
+}
+
+// True once onboarding is no longer needed (a read error counts as done,
+// like launchState, so it never blocks the app)
+function profileComplete() {
+  try {
+    return !getProfile().missing
+  } catch {
+    return true
+  }
+}
+
 function Root() {
   const { colors, isDark } = useTheme()
   const t = useT()
+  const [initialState] = useState(launchState)
+
+  // Startup jobs below wait for a complete profile AND a closed Onboarding
+  // (the profile is saved before the optional account step): nothing may
+  // cover it. Re-checked on each navigation change (Onboarding ends with
+  // navigation.reset).
+  const [profileReady, setProfileReady] = useState(() => !initialState && profileComplete())
+  const onNavStateChange = (state) => {
+    if (profileReady) return
+    const onboardingOpen = !!state?.routes?.some((r) => r.name === 'Onboarding')
+    if (!onboardingOpen && profileComplete()) setProfileReady(true)
+  }
 
   // Silent update check (GitHub Releases) shortly after startup: when a
   // newer, non-dismissed version exists, open the in-app update sheet
   // (download + install without leaving the app).
   const [updateInfo, setUpdateInfo] = useState(null)
   useEffect(() => {
+    if (!profileReady) return undefined
     let alive = true
     const timer = setTimeout(() => {
       getStartupUpdate().then((info) => {
@@ -105,16 +147,17 @@ function Root() {
       })
     }, 3000)
     return () => { alive = false; clearTimeout(timer) }
-  }, [])
+  }, [profileReady])
 
   // Silent Google Drive auto-backup, deferred so it never slows startup:
   // runs only when an account is connected AND the chosen frequency is due
   // (open = always; daily/weekly = compared with the last backup date).
   // Fully silent: offline or expired-session errors are swallowed.
   useEffect(() => {
+    if (!profileReady) return undefined
     const timer = setTimeout(() => { maybeAutoBackup() }, 8000)
     return () => clearTimeout(timer)
-  }, [])
+  }, [profileReady])
 
   const navTheme = {
     ...(isDark ? DarkTheme : DefaultTheme),
@@ -136,15 +179,8 @@ function Root() {
     contentStyle: { backgroundColor: colors.bg },
   }
 
-  // "+" header button for the accounts/categories list sub-screens
-  const headerAdd = (navigation, target) => () => (
-    <Pressable onPress={() => navigation.navigate(target)} hitSlop={8} style={{ padding: 4 }}>
-      <Ionicons name="add" size={24} color={colors.ink} />
-    </Pressable>
-  )
-
   return (
-    <NavigationContainer theme={navTheme}>
+    <NavigationContainer theme={navTheme} initialState={initialState} onStateChange={onNavStateChange}>
       <StatusBar style={isDark ? 'light' : 'dark'} />
       <Stack.Navigator>
         <Stack.Screen name="Tabs" component={Tabs} options={{ headerShown: false }} />
@@ -161,20 +197,12 @@ function Root() {
         <Stack.Screen
           name="AccountsList"
           component={AccountsListScreen}
-          options={({ navigation }) => ({
-            title: t('nav.accounts'),
-            ...stackHeader,
-            headerRight: headerAdd(navigation, 'AccountForm'),
-          })}
+          options={{ title: t('nav.accounts'), ...stackHeader }}
         />
         <Stack.Screen
           name="Categories"
           component={CategoriesScreen}
-          options={({ navigation }) => ({
-            title: t('nav.categories'),
-            ...stackHeader,
-            headerRight: headerAdd(navigation, 'CategoryForm'),
-          })}
+          options={{ title: t('nav.categories'), ...stackHeader }}
         />
         <Stack.Screen
           name="Sync"
@@ -215,6 +243,16 @@ function Root() {
           name="ForecastSession"
           component={ForecastSessionScreen}
           options={{ title: t('nav.forecastSession'), ...stackHeader }}
+        />
+        <Stack.Screen
+          name="Onboarding"
+          component={OnboardingScreen}
+          options={{ title: t('nav.onboarding'), headerShown: false, gestureEnabled: false, contentStyle: { backgroundColor: colors.bg } }}
+        />
+        <Stack.Screen
+          name="FeeRuleForm"
+          component={FeeRuleFormScreen}
+          options={{ title: t('nav.feeRule'), ...stackHeader }}
         />
         <Stack.Screen
           name="About"
@@ -284,7 +322,9 @@ export default function App() {
         <I18nProvider>
           <AppProvider>
             <FiltersProvider>
-              <Root />
+              <PrivacyProvider>
+                <Root />
+              </PrivacyProvider>
             </FiltersProvider>
           </AppProvider>
         </I18nProvider>

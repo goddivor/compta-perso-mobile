@@ -6,7 +6,7 @@
 // last_push, last_pull.
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import * as Device from 'expo-device'
-import { dumpAllData, restoreAllData } from '../db/database'
+import { dumpAllData, restoreAllData, isValidSnapshot } from '../db/database'
 
 const CONFIG_URL = 'https://compta-perso-sync-api.vercel.app/api/config'
 const CONFIG_KEY = process.env.EXPO_PUBLIC_CONFIG_KEY
@@ -104,7 +104,9 @@ function deviceName() {
   return `mobile-${Device.modelName || 'android'}`
 }
 
-// Push ALL local rows of every table to the cloud
+// Push ALL local rows of every table to the cloud. The snapshot carries
+// the v2 tables (profile, fee_rules) too; a server that does not know them
+// yet ignores them.
 export async function syncPush() {
   const cfg = await getSyncConfig()
   assertConfigured(cfg)
@@ -117,11 +119,15 @@ export async function syncPush() {
   return result
 }
 
-// Pull the cloud snapshot and REPLACE all local content
+// Pull the cloud snapshot and REPLACE all local content. An old snapshot
+// without profile / fee_rules is accepted (restoreAllData keeps the local
+// profile and rebuilds fee rules from fees_rate); a malformed one is
+// refused before any local row is touched.
 export async function syncPull() {
   const cfg = await getSyncConfig()
   assertConfigured(cfg)
   const result = await api(cfg, '/api/pull', { method: 'GET' })
+  if (!isValidSnapshot(result.data)) throw new SyncError('server', 'Invalid snapshot')
   restoreAllData(result.data)
   await saveSyncConfig({ last_pull: new Date().toISOString() })
   return result.meta

@@ -1,28 +1,22 @@
-// Forecast (simulations) list — stack screen reached from the orange
-// floating button of the Transactions tab.
+// Forecast (simulations) list — stack screen reached from the Transactions tab.
 // A session is a "what if" scenario: its transactions live in the same
 // table but carry a forecast_session_id, so they never touch the real
-// balances until the session is validated.
-// Cards: colored left bar (cycling palette like the desktop), name,
-// description, creation date, transaction count and signed net.
-// Tap opens the detail, long press deletes (confirmation), the FAB
-// creates a session through a bottom sheet.
-import { useCallback, useState } from 'react'
-import { View, Text, FlatList, Pressable, Alert, ActivityIndicator, StyleSheet } from 'react-native'
+// balances until the session is confirmed.
+// In progress first (name, description when set, pill, short date, net),
+// then the confirmed ones. Tap opens the session (where it is deleted: no
+// long press); the bare Fab creates one through a bottom sheet.
+import { useCallback, useMemo, useState } from 'react'
+import { View, Text, FlatList, Pressable, ActivityIndicator, StyleSheet } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import Ionicons from '@expo/vector-icons/Ionicons'
-import { useTheme, fonts, radius, shadowCard, shadowOverlay } from '../theme/tokens'
-import { listForecastSessions, createForecastSession, deleteForecastSession } from '../db/database'
-import { fmt, fmtDate } from '../utils/format'
+import { useTheme, fonts, radius } from '../theme/tokens'
+import { listForecastSessions, createForecastSession } from '../db/database'
+import { shortDate } from '../utils/dates'
 import { useApp } from '../context/AppContext'
 import { useFocusData } from '../hooks/useFocusData'
 import { useT } from '../i18n'
-import { EmptyState } from '../components/ui'
+import { Fab, EmptyState, Amount } from '../components/v2'
 import ForecastSessionSheet from '../components/ForecastSessionSheet'
-
-// Same cycling palette as the desktop simulation list
-const SIM_COLORS = ['#F59E0B', '#818CF8', '#34D399', '#F472B6', '#60A5FA', '#FB923C']
-const simColor = (index) => SIM_COLORS[index % SIM_COLORS.length]
 
 export default function ForecastScreen({ navigation }) {
   const { colors } = useTheme()
@@ -33,27 +27,23 @@ export default function ForecastScreen({ navigation }) {
 
   const { loading } = useFocusData(() => setSessions(listForecastSessions()), [tick])
 
+  // Flat rows: active sessions, then the "Confirmées" header and its sessions
+  const rows = useMemo(() => {
+    const active = sessions.filter((s) => !s.validated_at)
+    const done = sessions
+      .filter((s) => s.validated_at)
+      .sort((a, b) => String(b.validated_at).localeCompare(String(a.validated_at)) || b.id - a.id)
+    const out = active.map((s) => ({ key: 's' + s.id, kind: 'session', s }))
+    if (done.length > 0) {
+      out.push({ key: 'h-done', kind: 'header' })
+      done.forEach((s) => out.push({ key: 's' + s.id, kind: 'session', s }))
+    }
+    return out
+  }, [sessions])
+
   const openSession = useCallback(
     (s) => navigation.navigate('ForecastSession', { id: s.id }),
     [navigation]
-  )
-
-  const confirmDelete = useCallback(
-    (s) => {
-      Alert.alert(
-        t('forecast.deleteTitle', { name: s.name }),
-        t('forecast.deleteMsg'),
-        [
-          { text: t('common.cancel'), style: 'cancel' },
-          {
-            text: t('common.delete'),
-            style: 'destructive',
-            onPress: () => { deleteForecastSession(s.id); refresh() },
-          },
-        ]
-      )
-    },
-    [refresh, t]
   )
 
   const createSession = useCallback(
@@ -66,71 +56,48 @@ export default function ForecastScreen({ navigation }) {
     [navigation, refresh]
   )
 
-  const keyExtractor = useCallback((s) => String(s.id), [])
   const renderItem = useCallback(
-    ({ item: s, index }) => {
-      const color = simColor(index)
-      const positive = s.net >= 0
+    ({ item }) => {
+      if (item.kind === 'header') {
+        return <Text style={[styles.section, { color: colors.muted }]}>{t('forecast.confirmedSection')}</Text>
+      }
+      const s = item.s
+      const done = !!s.validated_at
       return (
         <Pressable
           onPress={() => openSession(s)}
-          onLongPress={() => confirmDelete(s)}
-          delayLongPress={350}
           style={({ pressed }) => [
             styles.card,
-            shadowCard,
-            {
-              backgroundColor: pressed ? colors.surface2 : colors.surface,
-              borderColor: colors.line,
-              borderLeftColor: color,
-            },
+            done
+              ? { borderWidth: 1, borderColor: colors.line, backgroundColor: pressed ? colors.surface2 : 'transparent' }
+              : { backgroundColor: pressed ? colors.surface2 : colors.surface },
           ]}
         >
-          <View style={{ flex: 1, gap: 4 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <Text
-                numberOfLines={1}
-                style={{ fontFamily: fonts.semibold, fontSize: 15, color: colors.ink, flexShrink: 1 }}
-              >
-                {s.name}
-              </Text>
-              {s.validated_at ? (
-                <View style={[styles.badge, { backgroundColor: colors.successSoft }]}>
-                  <Ionicons name="checkmark-circle" size={12} color={colors.success} />
-                  <Text style={{ fontFamily: fonts.medium, fontSize: 10, color: colors.success }}>
-                    {t('forecast.validated')}
-                  </Text>
-                </View>
-              ) : null}
-            </View>
-
-            {s.description ? (
-              <Text numberOfLines={2} style={{ fontFamily: fonts.regular, fontSize: 12, color: colors.content }}>
-                {s.description}
-              </Text>
-            ) : null}
-
-            {/* A validated session no longer owns any transaction (they became
-                real ones), so its count and net would always read zero */}
-            <Text style={{ fontFamily: fonts.regular, fontSize: 11, color: colors.muted }}>
-              {s.validated_at
-                ? `${fmtDate(s.created_at)} · ${t('forecast.validatedOn', { date: fmtDate(s.validated_at) })}`
-                : `${fmtDate(s.created_at)} · ${t(s.tx_count === 1 ? 'forecast.txOne' : 'forecast.txMany', { n: s.tx_count })}`}
+          <View style={styles.main}>
+            <Text numberOfLines={2} style={[styles.name, { color: done ? colors.content : colors.ink, fontFamily: done ? fonts.medium : fonts.semibold }]}>
+              {s.name}
             </Text>
+            {s.description ? (
+              <Text numberOfLines={2} style={[styles.desc, { color: colors.content }]}>{s.description}</Text>
+            ) : null}
+            <View style={styles.meta}>
+              <View style={[styles.pill, { backgroundColor: done ? colors.surface2 : colors.primarySoft }]}>
+                <Ionicons name={done ? 'checkmark' : 'time-outline'} size={15} color={done ? colors.content : colors.ink} />
+                <Text style={[styles.pillText, { color: done ? colors.content : colors.ink }]}>
+                  {done ? t('forecast.confirmed') : t('forecast.inProgress')}
+                </Text>
+              </View>
+              <Text style={[styles.date, { color: colors.muted }]}>{shortDate(done ? s.validated_at : s.created_at)}</Text>
+            </View>
           </View>
-
-          <View style={{ alignItems: 'flex-end', gap: 4 }}>
-            {s.validated_at ? null : (
-              <Text style={{ fontFamily: fonts.bold, fontSize: 14, color: positive ? colors.success : colors.danger }}>
-                {positive ? '+' : '-'}{fmt(Math.abs(s.net))}
-              </Text>
-            )}
-            <Ionicons name="chevron-forward" size={16} color={colors.faint} />
-          </View>
+          {/* A confirmed session no longer owns any transaction: no net */}
+          {done ? null : (
+            <Amount value={Math.abs(s.net)} type={s.net > 0 ? 'CREDIT' : s.net < 0 ? 'DEBIT' : undefined} size={16} weight="bold" />
+          )}
         </Pressable>
       )
     },
-    [colors, confirmDelete, openSession, t]
+    [colors, openSession, t]
   )
 
   return (
@@ -141,51 +108,15 @@ export default function ForecastScreen({ navigation }) {
         </View>
       ) : (
         <FlatList
-          data={sessions}
-          keyExtractor={keyExtractor}
+          data={rows}
+          keyExtractor={(r) => r.key}
           renderItem={renderItem}
-          contentContainerStyle={{ padding: 20, paddingBottom: 110, gap: 12 }}
-          ListHeaderComponent={
-            sessions.length > 0 ? (
-              <Text style={{ fontFamily: fonts.regular, fontSize: 12, color: colors.muted, marginBottom: 2 }}>
-                {t('forecast.intro')}
-              </Text>
-            ) : null
-          }
-          ListFooterComponent={
-            sessions.length > 0 ? (
-              <Text style={[styles.hint, { color: colors.faint }]}>{t('forecast.longPressHint')}</Text>
-            ) : null
-          }
-          ListEmptyComponent={
-            <View style={{ paddingTop: 40, gap: 6 }}>
-              <EmptyState icon="git-branch-outline" text={t('forecast.emptyTitle')} />
-              <Text
-                style={{
-                  fontFamily: fonts.regular,
-                  fontSize: 12,
-                  color: colors.faint,
-                  textAlign: 'center',
-                  marginHorizontal: 20,
-                }}
-              >
-                {t('forecast.emptyHint')}
-              </Text>
-            </View>
-          }
+          contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 16, paddingTop: 8, paddingBottom: 96, gap: 10 }}
+          ListEmptyComponent={<EmptyState icon="layers-outline" title={t('forecast.empty')} />}
         />
       )}
 
-      <Pressable
-        onPress={() => setSheetOpen(true)}
-        style={({ pressed }) => [
-          styles.fab,
-          shadowOverlay,
-          { backgroundColor: pressed ? colors.primary600 : colors.primary },
-        ]}
-      >
-        <Ionicons name="add" size={30} color={colors.primaryInk} />
-      </Pressable>
+      <Fab onPress={() => setSheetOpen(true)} accessibilityLabel={t('forecast.newSession')} />
 
       <ForecastSessionSheet
         visible={sheetOpen}
@@ -200,38 +131,26 @@ export default function ForecastScreen({ navigation }) {
 const styles = StyleSheet.create({
   card: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: 12,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderLeftWidth: 4,
-    paddingVertical: 14,
-    paddingHorizontal: 14,
+    padding: 16,
+    borderRadius: radius.xxl,
   },
-  badge: {
+  main: { flex: 1, minWidth: 0 },
+  name: { fontSize: 16, lineHeight: 21 },
+  desc: { fontFamily: fonts.regular, fontSize: 13, lineHeight: 18, marginTop: 2 },
+  meta: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginTop: 10 },
+  pill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 3,
-    borderRadius: 999,
-    paddingHorizontal: 7,
-    paddingVertical: 2,
+    gap: 4,
+    height: 24,
+    paddingLeft: 6,
+    paddingRight: 10,
+    borderRadius: 12,
   },
-  hint: {
-    fontFamily: fonts.regular,
-    fontSize: 11,
-    textAlign: 'center',
-    marginTop: 6,
-    marginHorizontal: 20,
-  },
+  pillText: { fontFamily: fonts.semibold, fontSize: 12 },
+  date: { fontFamily: fonts.regular, fontSize: 12 },
+  section: { fontFamily: fonts.semibold, fontSize: 14, marginTop: 6, marginLeft: 4 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  fab: {
-    position: 'absolute',
-    right: 20,
-    bottom: 24,
-    width: 58,
-    height: 58,
-    borderRadius: 29,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
 })

@@ -1,0 +1,32 @@
+// English strings, area "simulations". Flat `screen.key` keys, {x} interpolation.
+// Only the unit owning this area edits this file (and its twin fr/simulations.js).
+export default {
+  /* --------------------------- Simulations ------------------------------- */
+  'forecast.title': 'Simulations',
+  'forecast.empty': 'No simulations',
+  'forecast.confirmedSection': 'Confirmed',
+  'forecast.inProgress': 'In progress',
+  'forecast.confirmed': 'Confirmed',
+  'forecast.createdOn': 'Created on {date}',
+  'forecast.createdConfirmedOn': 'Created on {date} · confirmed on {confirmed}',
+  'forecast.newSession': 'New simulation',
+  'forecast.editSession': 'Edit simulation',
+  'forecast.sessionNameLabel': 'Name',
+  'forecast.sessionDescription': 'Description',
+  'forecast.net': 'Simulated net',
+  'forecast.opOne': 'transaction',
+  'forecast.opMany': 'transactions',
+  'forecast.projected': 'Projected balances',
+  'forecast.currentBalance': 'Current balance {amount}',
+  'forecast.txSection': 'Simulated transactions',
+  'forecast.opsSection': 'Transactions',
+  'forecast.viewTransactions': 'View in transactions',
+  'forecast.addTx': 'Add a transaction',
+  'forecast.validate': 'Confirm the simulation',
+  'forecast.validateTitle': 'Confirm the simulation?',
+  'forecast.validateLine': '{name}: {from} → {to}',
+  'forecast.validateConfirm': 'Confirm',
+  'forecast.delete': 'Delete the simulation',
+  'forecast.deleteTitle': 'Delete the simulation?',
+  'forecast.notFound': 'Simulation not found',
+}

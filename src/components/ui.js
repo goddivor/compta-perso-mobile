@@ -1,4 +1,6 @@
 // Home-made UI kit styled with the Goodness tokens (no external UI lib).
+// v1 pieces, kept for the screens not yet rewritten; new code uses
+// components/v2 (Select, EmptyState, ConfirmDialog…).
 import { useState } from 'react'
 import {
   View,
@@ -130,7 +132,7 @@ export function Select({ value, options, onChange, placeholder }) {
       </Pressable>
 
       <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
-        <Pressable style={styles.backdrop} onPress={() => setOpen(false)}>
+        <Pressable style={[styles.backdrop, { backgroundColor: colors.scrim }]} onPress={() => setOpen(false)}>
           <Pressable
             style={[
               styles.sheet,
@@ -266,7 +268,6 @@ const styles = StyleSheet.create({
   },
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
     justifyContent: 'flex-end',
   },
   sheet: {
