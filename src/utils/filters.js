@@ -56,8 +56,9 @@ function toLegacySet(set) {
 
 // v2 state → the query shape of database.listTransactions():
 // { account_ids, accounts_exclude, category_ids, categories_exclude, type,
-//   date_from, date_to, transfers_only }. transfers_only is not read by the
-// data layer yet (type 'TRANSFER' then filters nothing).
+//   date_from, date_to, transfers_only }. The 'TRANSFER' type becomes
+// transfers_only: listTransactions then keeps only transfer legs (rows with
+// a transfer_pair_id); type stays null so both legs are listed.
 export function toQuery(f) {
   const a = toLegacySet(f.accounts)
   const c = toLegacySet(f.categories)
