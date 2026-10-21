@@ -120,9 +120,6 @@ export default function UpdateModal({ visible, info, onLater, onClose }) {
               <Text style={{ fontFamily: fonts.medium, fontSize: 13, color: colors.ink, textAlign: 'center' }}>
                 {t('update.installing')}
               </Text>
-              <Text style={{ fontFamily: fonts.regular, fontSize: 11.5, color: colors.muted, textAlign: 'center' }}>
-                {t('update.installHint')}
-              </Text>
             </View>
           ) : (
             <View style={{ gap: 10, marginTop: 14 }}>

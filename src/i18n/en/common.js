@@ -56,7 +56,6 @@ export default {
   'update.later': 'Later',
   'update.downloading': 'Downloading… {pct}%',
   'update.installing': 'Opening the Android installer…',
-  'update.installHint': 'Android may ask you to allow the app to install unknown apps.',
   'update.errDownload': 'Download failed. Check your internet connection.',
   'update.errInstall': 'The installer could not start. Opening the download page…',
 
