@@ -85,13 +85,8 @@ export const SettingsRow = memo(function SettingsRow({
 }) {
   const { colors } = useTheme()
   const danger = tone === 'danger'
-  return (
-    <Pressable
-      onPress={onPress}
-      disabled={!onPress || disabled || loading}
-      accessibilityRole={onPress ? 'button' : undefined}
-      style={({ pressed }) => [styles.row, pressed && onPress && { backgroundColor: colors.surface2 }, disabled && { opacity: 0.45 }]}
-    >
+  const content = (
+    <>
       {leading || <Tile icon={icon} tone={tone} />}
       <View style={{ flex: 1, gap: 1 }}>
         <Text numberOfLines={wrap ? undefined : 1} style={{ fontFamily: fonts.medium, fontSize: 15, color: danger ? colors.danger : colors.ink }}>
@@ -105,6 +100,21 @@ export const SettingsRow = memo(function SettingsRow({
       </View>
       {loading ? <ActivityIndicator size="small" color={colors.muted} /> : right}
       {chevron && onPress && !loading ? <Ionicons name="chevron-forward" size={18} color={colors.faint} /> : null}
+    </>
+  )
+  // A row without an action is a fixed, informational row: a plain View, so
+  // it is neither clickable nor announced as a button and shows no ripple.
+  if (!onPress) {
+    return <View style={[styles.row, disabled && { opacity: 0.45 }]}>{content}</View>
+  }
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled || loading}
+      accessibilityRole="button"
+      style={({ pressed }) => [styles.row, pressed && { backgroundColor: colors.surface2 }, disabled && { opacity: 0.45 }]}
+    >
+      {content}
     </Pressable>
   )
 })
