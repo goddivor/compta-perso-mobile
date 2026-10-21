@@ -2,10 +2,10 @@
 // Only the unit owning this area edits this file (and its twin fr/categories.js).
 export default {
   /* ------------------------------ Categories ----------------------------- */
-  'categories.empty': 'No categories. Tap + to create one.',
-  'categories.deleteTitle': 'Delete “{name}”',
-  'categories.deleteMsg': 'Linked transactions will lose their category. Continue?',
-  'categories.editHint': 'Tap a category to edit it.',
+  'categories.empty': 'No categories',
+  'categories.edit': 'Edit',
+  'categories.deleteTitle': 'Delete category?',
+  'categories.deleteMsg': '“{name}” will be deleted. Linked transactions will lose their category.',
 
   /* ----------------------------- Category form --------------------------- */
   'categoryForm.title': 'New category',
@@ -13,7 +13,9 @@ export default {
   'categoryForm.name': 'Name',
   'categoryForm.namePlaceholder': 'e.g. Internet',
   'categoryForm.flow': 'Flow',
-  'categoryForm.both': 'Both',
+  'categoryForm.both': 'Debit and credit',
   'categoryForm.color': 'Color',
+  'categoryForm.icon': 'Icon',
+  'categoryForm.noIcon': 'No icon',
   'categoryForm.delete': 'Delete category',
 }
