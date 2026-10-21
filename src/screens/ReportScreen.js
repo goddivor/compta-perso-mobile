@@ -10,7 +10,7 @@ import { View, Text, FlatList, Pressable, ActivityIndicator, StyleSheet } from '
 import { SafeAreaView } from 'react-native-safe-area-context'
 import Ionicons from '@expo/vector-icons/Ionicons'
 import { useTheme, fonts, radius } from '../theme/tokens'
-import { dayBalances, getDailyReport, listAccounts, listTransactions } from '../db/database'
+import { dayBalances, getDailyReport, listAccounts, listTransactions, transferPairsByDay } from '../db/database'
 import { getFormatLocale, today, shiftDay } from '../utils/format'
 import { useTick } from '../context/AppContext'
 import { useFocusData } from '../hooks/useFocusData'
@@ -244,20 +244,11 @@ export default function ReportScreen({ navigation }) {
       }
     }
     // A transfer whose two legs are both in the selection is ONE operation
-    const idSet = new Set(ids.length ? ids : accs.map((a) => a.id))
-    const legs = listTransactions({ transfers_only: true, account_ids: ids, date_from: from })
-    const visible = new Set(legs.map((x) => x.id))
-    const pairs = new Map()
-    for (const x of legs) {
-      if (idSet.has(x.account_id) && visible.has(x.transfer_pair_id)) {
-        const day = String(x.date).slice(0, 10)
-        pairs.set(day, (pairs.get(day) || 0) + 0.5)
-      }
-    }
+    const pairs = new Map(transferPairsByDay({ from, accountIds: ids }).map((r) => [r.day, r.pairs]))
     setRows(
       days.map((d) => {
         const f = flows.get(d.day) || { inn: 0, out: 0 }
-        return { ...d, inn: f.inn, out: f.out, ops: Math.max(1, d.count - Math.round(pairs.get(d.day) || 0)) }
+        return { ...d, inn: f.inn, out: f.out, ops: Math.max(1, d.count - (pairs.get(d.day) || 0)) }
       })
     )
   }, [period, sel, tick])
