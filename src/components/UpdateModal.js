@@ -76,7 +76,7 @@ export default function UpdateModal({ visible, info, onLater, onClose }) {
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={busy ? () => {} : onClose}>
-      <Pressable style={styles.backdrop} onPress={busy ? undefined : onClose}>
+      <Pressable style={[styles.backdrop, { backgroundColor: colors.scrim }]} onPress={busy ? undefined : onClose}>
         <Pressable
           style={[styles.sheet, shadowOverlay, { backgroundColor: colors.surface, borderColor: colors.line }]}
           onPress={() => {}}
@@ -144,12 +144,11 @@ export default function UpdateModal({ visible, info, onLater, onClose }) {
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
     justifyContent: 'flex-end',
   },
   sheet: {
-    borderTopLeftRadius: radius.xl,
-    borderTopRightRadius: radius.xl,
+    borderTopLeftRadius: radius.sheet,
+    borderTopRightRadius: radius.sheet,
     borderWidth: 1,
     paddingHorizontal: 20,
     paddingTop: 18,
