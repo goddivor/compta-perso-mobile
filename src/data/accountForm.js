@@ -17,6 +17,14 @@ export function kindControls({ savedId, type, operatorId }) {
 // "Enregistrer" only.
 export const saveBeforeRule = (savedId) => !savedId
 
+// Starting balance to save. v1 stored parseFloat values, so an account may
+// hold a decimal balance: until the field is edited, `exact` is the stored
+// number and is saved as is. A typed value is parsed to whole FCFA.
+export function balanceToSave(text, exact) {
+  if (exact != null) return exact
+  return Math.round(parseFloat(String(text).replace(/\s/g, '').replace(',', '.')) || 0)
+}
+
 // Only active operators can be picked (rebranded, merged, defunct cannot)
 export const isActiveOperator = (op) => (op.status || 'active') === 'active'
 

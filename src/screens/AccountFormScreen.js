@@ -22,7 +22,7 @@ import { Field, Input, Button } from '../components/ui'
 import { nextAccountColor } from '../data/accountColors'
 import { SuffixInput } from '../data/SuffixInput'
 import { operatorTypeLabel, operatorGroupLabel, ruleSummary, RULE_ICON } from '../data/accountLabels'
-import { kindControls, saveBeforeRule, isActiveOperator, suggestionsTitle } from '../data/accountForm'
+import { kindControls, saveBeforeRule, isActiveOperator, suggestionsTitle, balanceToSave } from '../data/accountForm'
 import { feeRuleLabel } from '../utils/fees'
 import { CURRENCY_LABEL } from '../utils/format'
 
@@ -226,6 +226,7 @@ export default function AccountFormScreen({ navigation, route }) {
   const [operatorId, setOperatorId] = useState(pre?.operatorId || null)
   const [name, setName] = useState(pre?.name || '')
   const [balance, setBalance] = useState('')
+  const [exactBalance, setExactBalance] = useState(null) // stored balance, saved as is until edited
   const [rules, setRules] = useState([])
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [txCount, setTxCount] = useState(0)
@@ -245,6 +246,7 @@ export default function AccountFormScreen({ navigation, route }) {
     setOperatorId(a.operator_id || null)
     setName(a.name)
     setBalance(String(a.initial_balance ?? 0))
+    setExactBalance(a.initial_balance ?? null)
   }, [editId])
 
   useFocusData(() => setRules(savedId ? listFeeRules(savedId) : []), [tick, savedId])
@@ -279,7 +281,7 @@ export default function AccountFormScreen({ navigation, route }) {
   }, [])
 
   const valid = name.trim().length > 0
-  const balanceNum = Math.round(parseFloat(String(balance).replace(/\s/g, '').replace(',', '.')) || 0)
+  const balanceNum = balanceToSave(balance, exactBalance)
 
   const provider = account ? account.provider : operator?.name ?? null
 
@@ -383,7 +385,7 @@ export default function AccountFormScreen({ navigation, route }) {
           <SuffixInput
             keyboardType="numeric"
             value={balance}
-            onChangeText={(v) => setBalance(v.replace(',', '.'))}
+            onChangeText={(v) => { setExactBalance(null); setBalance(v.replace(',', '.')) }}
             placeholder="0"
             suffix={CURRENCY_LABEL}
           />
