@@ -22,6 +22,7 @@ export default {
   'accountForm.noOperator': 'No operator',
   'accountForm.otherAccount': 'Other account',
   'accountForm.alsoCalled': 'also called {alias}',
+  'accountForm.noResult': 'No results',
   'accountForm.more': '{n} more…',
   'accountForm.createFree': 'Create “{name}” without operator',
 

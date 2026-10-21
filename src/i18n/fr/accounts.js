@@ -23,6 +23,7 @@ export default {
   'accountForm.noOperator': 'Sans opérateur',
   'accountForm.otherAccount': 'Autre compte',
   'accountForm.alsoCalled': 'aussi appelé {alias}',
+  'accountForm.noResult': 'Aucun résultat',
   'accountForm.more': '{n} autres…',
   'accountForm.createFree': 'Créer « {name} » sans opérateur',
 
