@@ -182,12 +182,15 @@ function backfillCategoryIcons(d) {
   }
 }
 
-// Each account with a fees_rate and no fee rule gets one 'percent' rule
-// carrying that rate (same fraction: 0.01 = 1 %). fees_rate is kept.
+// Each account with a usable fees_rate and no fee rule gets one 'percent'
+// rule carrying that rate (same fraction: 0.01 = 1 %). A rate of 0 (it
+// would only suggest "0 FCFA") or outside ]0, 1] creates nothing. fees_rate
+// itself is kept as is; existing rules are never touched.
 function backfillFeeRules(d) {
   const rows = d.getAllSync(`
     SELECT a.id, a.fees_rate FROM accounts a
-    WHERE a.fees_rate IS NOT NULL
+    WHERE typeof(a.fees_rate) IN ('real', 'integer')
+      AND a.fees_rate > 0 AND a.fees_rate <= 1
       AND NOT EXISTS (SELECT 1 FROM fee_rules r WHERE r.account_id = a.id)
   `)
   for (const row of rows) {
@@ -291,8 +294,21 @@ export function dismissOperator(id) {
   getDb().runSync('UPDATE accounts SET operator_dismissed=1 WHERE id=?', [id])
 }
 
+// Deletes the account and (ON DELETE CASCADE) its transactions and fee
+// rules. The other leg of each of its transfers stays on its own account as
+// a plain row: its transfer_pair_id is cleared in the same SQL transaction,
+// so no row points to a deleted twin. The other account's money movement
+// is never deleted.
 export function deleteAccount(id) {
-  getDb().runSync('DELETE FROM accounts WHERE id=?', [id])
+  const d = getDb()
+  d.withTransactionSync(() => {
+    d.runSync(
+      `UPDATE transactions SET transfer_pair_id=NULL
+       WHERE account_id<>? AND transfer_pair_id IN (SELECT id FROM transactions WHERE account_id=?)`,
+      [id, id]
+    )
+    d.runSync('DELETE FROM accounts WHERE id=?', [id])
+  })
 }
 
 /* ----------------------------- Categories ------------------------------ */
@@ -1002,9 +1018,36 @@ function tableColumns(d, table) {
   return d.getAllSync(`PRAGMA table_info(${table})`).map((c) => c.name)
 }
 
+// SQLite binds numbers, strings and null: a boolean becomes 0/1, an array
+// or object its JSON (e.g. fee_rules.tiers sent as an array), as desktop does
+function bindable(v) {
+  if (v === undefined || v === null) return null
+  if (typeof v === 'boolean') return v ? 1 : 0
+  if (typeof v === 'number' || typeof v === 'string') return v
+  if (v instanceof Uint8Array) return v
+  return JSON.stringify(v)
+}
+
+// Inserts rows keeping, per row, the local columns that row carries: a
+// snapshot column unknown here is dropped, a local column absent from a row
+// takes its default (a key missing from the first row no longer drops that
+// column for every row). Same rule as desktop insertRows.
+function insertRows(d, table, rows) {
+  const cols = tableColumns(d, table)
+  for (const row of rows) {
+    if (!row || typeof row !== 'object') continue
+    const usable = cols.filter((c) => row[c] !== undefined)
+    if (!usable.length) continue
+    d.runSync(
+      `INSERT INTO ${table} (${usable.join(',')}) VALUES (${usable.map(() => '?').join(',')})`,
+      usable.map((c) => bindable(row[c]))
+    )
+  }
+}
+
 // Replace ALL local content with the cloud payload, keeping ids.
 // Foreign keys are disabled during the operation; only columns that exist
-// locally are inserted (tolerates schema drift).
+// locally are inserted, chosen per row (tolerates schema drift).
 // Old snapshots (v1 clients, or a server without the v2 tables):
 // - no profile rows → the local profile is kept (not wiped);
 // - no fee_rules → each account with a fees_rate gets its percent rule back;
@@ -1016,7 +1059,9 @@ export function restoreAllData(data) {
   const payload = data
   // A snapshot profile counts only when it carries a currency; it is
   // always stored as the singleton row id = 1.
-  const snapProfile = Array.isArray(payload.profile) ? payload.profile.find((p) => p && p.currency) : null
+  const snapProfile = Array.isArray(payload.profile)
+    ? payload.profile.find((p) => p && typeof p === 'object' && p.currency)
+    : null
   const keepProfile = !snapProfile
   d.execSync('PRAGMA foreign_keys = OFF')
   try {
@@ -1030,14 +1075,7 @@ export function restoreAllData(data) {
         const rows = t === 'profile'
           ? [{ ...snapProfile, id: 1 }]
           : (Array.isArray(payload[t]) ? payload[t] : [])
-        if (!rows.length) continue
-        const cols = tableColumns(d, t)
-        const usable = cols.filter((c) => c in rows[0])
-        if (!usable.length) continue
-        const sql = `INSERT INTO ${t} (${usable.join(',')}) VALUES (${usable.map(() => '?').join(',')})`
-        for (const row of rows) {
-          d.runSync(sql, usable.map((c) => row[c] ?? null))
-        }
+        if (rows.length) insertRows(d, t, rows)
       }
       d.runSync('INSERT OR IGNORE INTO profile (id) VALUES (1)')
       backfillFeeRules(d)
