@@ -313,6 +313,119 @@ export function deleteCategory(id) {
   getDb().runSync('DELETE FROM categories WHERE id=?', [id])
 }
 
+/* ------------------------------ Fee rules ------------------------------ */
+// Fee rules are suggestions only: the transaction form shows each rule as a
+// chip that fills the free fees field. kind:
+// - 'percent': value is a fraction of the base amount (0.01 = 1 %)
+// - 'fixed':   value is the fee itself
+// - 'tiers':   tiers = [[max, fee], …]; the first tier whose max >= base wins
+// accounts.fees_rate mirrors the account's first percent rule (desktop and
+// older clients still read it).
+
+export const FEE_RULE_KINDS = ['percent', 'fixed', 'tiers']
+
+function parseTiers(raw) {
+  if (raw == null || raw === '') return null
+  try {
+    const v = typeof raw === 'string' ? JSON.parse(raw) : raw
+    return Array.isArray(v) ? v : null
+  } catch {
+    return null
+  }
+}
+
+function feeRuleRow(row) {
+  return { ...row, tiers: parseTiers(row.tiers) }
+}
+
+// Validates and normalizes a rule's kind/value/tiers; throws on bad input
+function feeRuleFields({ kind, value, tiers }) {
+  if (!FEE_RULE_KINDS.includes(kind)) throw new Error(`Invalid fee rule kind: ${kind}`)
+  if (kind === 'tiers') {
+    const list = parseTiers(tiers)
+    const ok = list && list.length > 0 && list.every(
+      (t) => Array.isArray(t) && t.length === 2 && Number.isFinite(Number(t[0])) && Number.isFinite(Number(t[1]))
+    )
+    if (!ok) throw new Error('Invalid fee rule tiers')
+    const sorted = list.map((t) => [Number(t[0]), Number(t[1])]).sort((a, b) => a[0] - b[0])
+    return { value: null, tiers: JSON.stringify(sorted) }
+  }
+  const n = Number(value)
+  if (value == null || value === '' || !Number.isFinite(n) || n < 0) throw new Error('Invalid fee rule value')
+  return { value: n, tiers: null }
+}
+
+// accounts.fees_rate = value of the account's first percent rule, or NULL
+function syncFeesRate(d, account_id) {
+  const first = d.getFirstSync(
+    "SELECT value FROM fee_rules WHERE account_id=? AND kind='percent' ORDER BY position, id LIMIT 1",
+    [account_id]
+  )
+  d.runSync('UPDATE accounts SET fees_rate=? WHERE id=?', [first ? first.value : null, account_id])
+}
+
+// Rules of one account (or of every account when account_id is null),
+// ordered by position; tiers come back parsed as [[max, fee], …].
+export function listFeeRules(account_id = null) {
+  const rows = account_id == null
+    ? getDb().getAllSync('SELECT * FROM fee_rules ORDER BY account_id, position, id')
+    : getDb().getAllSync('SELECT * FROM fee_rules WHERE account_id=? ORDER BY position, id', [account_id])
+  return rows.map(feeRuleRow)
+}
+
+// Creates a rule at the end of the account's list; returns its id
+export function createFeeRule({ account_id, name, kind, value, tiers }) {
+  const d = getDb()
+  const f = feeRuleFields({ kind, value, tiers })
+  let id = null
+  d.withTransactionSync(() => {
+    const { p } = d.getFirstSync('SELECT COALESCE(MAX(position), -1) + 1 AS p FROM fee_rules WHERE account_id=?', [account_id])
+    id = d.runSync(
+      'INSERT INTO fee_rules (account_id, name, kind, value, tiers, position) VALUES (?,?,?,?,?,?)',
+      [account_id, name || null, kind, f.value, f.tiers, p]
+    ).lastInsertRowId
+    syncFeesRate(d, account_id)
+  })
+  return id
+}
+
+// Replaces a rule's name, kind, value and tiers (account and position kept)
+export function updateFeeRule({ id, name, kind, value, tiers }) {
+  const d = getDb()
+  const f = feeRuleFields({ kind, value, tiers })
+  d.withTransactionSync(() => {
+    d.runSync('UPDATE fee_rules SET name=?, kind=?, value=?, tiers=? WHERE id=?', [name || null, kind, f.value, f.tiers, id])
+    const row = d.getFirstSync('SELECT account_id FROM fee_rules WHERE id=?', [id])
+    if (row) syncFeesRate(d, row.account_id)
+  })
+}
+
+// Deletes one rule (the caller confirms first)
+export function deleteFeeRule(id) {
+  const d = getDb()
+  d.withTransactionSync(() => {
+    const row = d.getFirstSync('SELECT account_id FROM fee_rules WHERE id=?', [id])
+    d.runSync('DELETE FROM fee_rules WHERE id=?', [id])
+    if (row) syncFeesRate(d, row.account_id)
+  })
+}
+
+// Suggested fee of a rule for a base amount (whole FCFA), or null when the
+// rule does not apply (base above every tier, or invalid input).
+export function feeFromRule(rule, base) {
+  const b = Number(base)
+  if (!rule || !Number.isFinite(b) || b <= 0) return null
+  if (rule.kind === 'percent') return Number.isFinite(Number(rule.value)) ? Math.round(b * Number(rule.value)) : null
+  if (rule.kind === 'fixed') return Number.isFinite(Number(rule.value)) ? Math.round(Number(rule.value)) : null
+  if (rule.kind === 'tiers') {
+    const tiers = parseTiers(rule.tiers)
+    if (!tiers) return null
+    const hit = tiers.map((t) => [Number(t[0]), Number(t[1])]).sort((x, y) => x[0] - y[0]).find((t) => b <= t[0])
+    return hit ? Math.round(hit[1]) : null
+  }
+  return null
+}
+
 /* ---------------------------- Transactions ----------------------------- */
 
 // EFFECTIVE category of a transaction: its own, or (for a transfer leg)
@@ -618,6 +731,75 @@ export function getDailyReport({ account_id, date_from, date_to } = {}) {
   `, params)
 }
 
+/* ---------------------- Daily opening / closing ------------------------ */
+
+// Opening and closing balances of each day that has real movements, newest
+// first. Closing of day J = current balance − every movement after J;
+// opening = closing − the day's net. Real rows only (forecast excluded);
+// amounts are signed with fees included, so a transfer moves the total by
+// its fees only. Days without movement are not listed.
+//   from, to: 'YYYY-MM-DD' bounds (optional, inclusive)
+//   accountIds: only these accounts ([] or undefined = all)
+//   excludeAccountIds: drop these accounts
+// → [{ day, open, close, net, count,
+//      accounts: [{ account_id, open, close, net, count }] }]
+// Every selected account appears in `accounts`, unchanged ones with net 0.
+export function dayBalances({ from, to, accountIds, excludeAccountIds } = {}) {
+  let accounts = listAccounts()
+  if (accountIds && accountIds.length) {
+    const keep = new Set(accountIds.map(Number))
+    accounts = accounts.filter((a) => keep.has(a.id))
+  }
+  if (excludeAccountIds && excludeAccountIds.length) {
+    const drop = new Set(excludeAccountIds.map(Number))
+    accounts = accounts.filter((a) => !drop.has(a.id))
+  }
+  if (!accounts.length) return []
+
+  const ids = accounts.map((a) => a.id)
+  const where = ['forecast_session_id IS NULL', `account_id IN (${ids.map(() => '?').join(',')})`, 'date(date) IS NOT NULL']
+  const params = [...ids]
+  // Movements after `to` are needed to walk back from the current balance
+  if (from) { where.push('date(date) >= ?'); params.push(from) }
+
+  const rows = getDb().getAllSync(`
+    SELECT date(date) AS day, account_id,
+      SUM(CASE WHEN type='CREDIT' THEN amount ELSE -amount END) AS net,
+      COUNT(*) AS n
+    FROM transactions
+    WHERE ${where.join(' AND ')}
+    GROUP BY day, account_id
+    ORDER BY day DESC
+  `, params)
+
+  const byDay = new Map()
+  for (const r of rows) {
+    if (!byDay.has(r.day)) byDay.set(r.day, new Map())
+    byDay.get(r.day).set(r.account_id, r)
+  }
+
+  // Running closing balance per account, starting from today's balance
+  const running = new Map(accounts.map((a) => [a.id, a.current_balance]))
+  const out = []
+  for (const [day, perAccount] of byDay) {
+    const lines = accounts.map((a) => {
+      const r = perAccount.get(a.id)
+      const net = r ? r.net : 0
+      const close = running.get(a.id)
+      const open = close - net
+      running.set(a.id, open)
+      return { account_id: a.id, open, close, net, count: r ? r.n : 0 }
+    })
+    if (to && day > to) continue
+    const total = lines.reduce(
+      (acc, l) => ({ open: acc.open + l.open, close: acc.close + l.close, net: acc.net + l.net, count: acc.count + l.count }),
+      { open: 0, close: 0, net: 0, count: 0 }
+    )
+    out.push({ day, ...total, accounts: lines })
+  }
+  return out
+}
+
 /* ------------------------------- Forecast ------------------------------ */
 // A forecast session is a "what if" scenario: its transactions carry
 // forecast_session_id = <session id> and are excluded from every real
@@ -727,7 +909,17 @@ export function deleteForecastSession(id) {
 
 /* ------------------------------ Sync dump ------------------------------ */
 
-export const SYNC_TABLES = ['accounts', 'categories', 'transactions', 'forecast_sessions']
+// Tables carried by a snapshot (push, pull, Drive backup). profile and
+// fee_rules are v2: an old snapshot may lack them, see restoreAllData.
+export const SYNC_TABLES = ['accounts', 'categories', 'transactions', 'forecast_sessions', 'fee_rules', 'profile']
+
+// Tables every snapshot, old or new, must carry as arrays
+const CORE_SYNC_TABLES = ['accounts', 'categories', 'transactions', 'forecast_sessions']
+
+// True when a payload is a usable snapshot (the four v1 tables are arrays)
+export function isValidSnapshot(data) {
+  return !!data && typeof data === 'object' && CORE_SYNC_TABLES.every((t) => Array.isArray(data[t]))
+}
 
 export function dumpAllData() {
   const d = getDb()
@@ -745,22 +937,43 @@ function tableColumns(d, table) {
 // Replace ALL local content with the cloud payload, keeping ids.
 // Foreign keys are disabled during the operation; only columns that exist
 // locally are inserted (tolerates schema drift).
+// Old snapshots (v1 clients, or a server without the v2 tables):
+// - no profile rows → the local profile is kept (not wiped);
+// - no fee_rules → each account with a fees_rate gets its percent rule back;
+// - built-in categories without an icon get theirs.
+// A payload without the four v1 tables throws before anything is deleted.
 export function restoreAllData(data) {
+  if (!isValidSnapshot(data)) throw new Error('Invalid snapshot: nothing restored')
   const d = getDb()
+  const payload = data
+  // A snapshot profile counts only when it carries a currency; it is
+  // always stored as the singleton row id = 1.
+  const snapProfile = Array.isArray(payload.profile) ? payload.profile.find((p) => p && p.currency) : null
+  const keepProfile = !snapProfile
   d.execSync('PRAGMA foreign_keys = OFF')
   try {
     d.withTransactionSync(() => {
-      for (const t of SYNC_TABLES) d.runSync(`DELETE FROM ${t}`)
       for (const t of SYNC_TABLES) {
-        const rows = data[t] || []
+        if (t === 'profile' && keepProfile) continue
+        d.runSync(`DELETE FROM ${t}`)
+      }
+      for (const t of SYNC_TABLES) {
+        if (t === 'profile' && keepProfile) continue
+        const rows = t === 'profile'
+          ? [{ ...snapProfile, id: 1 }]
+          : (Array.isArray(payload[t]) ? payload[t] : [])
         if (!rows.length) continue
         const cols = tableColumns(d, t)
         const usable = cols.filter((c) => c in rows[0])
+        if (!usable.length) continue
         const sql = `INSERT INTO ${t} (${usable.join(',')}) VALUES (${usable.map(() => '?').join(',')})`
         for (const row of rows) {
           d.runSync(sql, usable.map((c) => row[c] ?? null))
         }
       }
+      d.runSync('INSERT OR IGNORE INTO profile (id) VALUES (1)')
+      backfillFeeRules(d)
+      backfillCategoryIcons(d)
     })
   } finally {
     d.execSync('PRAGMA foreign_keys = ON')
