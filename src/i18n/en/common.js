@@ -59,4 +59,23 @@ export default {
   'update.installHint': 'Android may ask you to allow the app to install unknown apps.',
   'update.errDownload': 'Download failed. Check your internet connection.',
   'update.errInstall': 'The installer could not start. Opening the download page…',
+
+  /* ------------------------- v2 shared components ----------------------- */
+  'common.add': 'Add',
+  'common.select': 'Select',
+  'common.close': 'Close',
+  'common.retry': 'Retry',
+  'common.today': 'Today',
+  'common.yesterday': 'Yesterday',
+  'common.transfer': 'Transfer',
+  'common.income': 'Income',
+  'common.expense': 'Expense',
+  'common.feesIncluded': 'incl. {amount} fees',
+  'common.transferFees': '+{amount} fees',
+  'common.feeRuleDefault': 'Account fees',
+  'common.included': 'included',
+  'common.excluded': 'excluded',
+  'common.offline': 'No connection',
+  'nav.onboarding': 'Welcome',
+  'nav.feeRule': 'Fee rule',
 }

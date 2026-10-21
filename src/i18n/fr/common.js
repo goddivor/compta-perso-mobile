@@ -59,4 +59,23 @@ export default {
   'update.installHint': "Android peut demander d'autoriser l'application à installer des applications inconnues.",
   'update.errDownload': 'Le téléchargement a échoué. Vérifie ta connexion internet.',
   'update.errInstall': "L'installation n'a pas pu démarrer. Ouverture de la page de téléchargement…",
+
+  /* ------------------------- v2 shared components ----------------------- */
+  'common.add': 'Ajouter',
+  'common.select': 'Choisir',
+  'common.close': 'Fermer',
+  'common.retry': 'Réessayer',
+  'common.today': 'Aujourd’hui',
+  'common.yesterday': 'Hier',
+  'common.transfer': 'Transfert',
+  'common.income': 'Entrée',
+  'common.expense': 'Dépense',
+  'common.feesIncluded': 'dont {amount} de frais',
+  'common.transferFees': '+{amount} de frais',
+  'common.feeRuleDefault': 'Frais du compte',
+  'common.included': 'inclus',
+  'common.excluded': 'exclu',
+  'common.offline': 'Pas de connexion',
+  'nav.onboarding': 'Bienvenue',
+  'nav.feeRule': 'Règle de frais',
 }
