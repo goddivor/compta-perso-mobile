@@ -20,7 +20,7 @@ import {
 import { useRefresh } from '../context/AppContext'
 import { useT } from '../i18n'
 import { EmptyState, ConfirmDialog } from '../components/v2'
-import { SettingsRow, RowSeparator, SectionCard, shortDateTime, longDateTime } from '../components/SettingsRow'
+import { SettingsRow, RowSeparator, SectionCard, shortDateTime, mediumDateTime, longDateTime } from '../components/SettingsRow'
 
 // Counts shown on the cloud state, in this order (raw table keys are never printed)
 const COUNT_KEYS = [
@@ -30,14 +30,19 @@ const COUNT_KEYS = [
   ['forecast_sessions', 'sync.countSimulations'],
 ]
 
-// Clean message for a SyncError (never crashes, never shows raw values)
+// A snapshot refused before anything is replaced: SyncError('server') from
+// syncPull, or the data layer's plain Error('Invalid snapshot: ...')
+const isInvalidSnapshot = (e) => /^invalid snapshot/i.test(String(e?.message || ''))
+
+// Translated message for any error (never crashes, never shows a raw message)
 function errorMessage(t, e) {
+  if (isInvalidSnapshot(e)) return t('sync.errInvalidSnapshot')
   switch (e?.code) {
     case 'offline': return t('sync.errOffline')
     case 'unauthorized': return t('sync.errUnauthorized')
-    case 'server': return t('sync.errServer', { status: e.status || '?' })
+    case 'server': return e.status ? t('sync.errServer', { status: e.status }) : t('sync.errGeneric')
     case 'not_configured': return t('sync.errNotConfigured')
-    default: return e?.message || t('common.error')
+    default: return t('sync.errGeneric')
   }
 }
 
@@ -176,7 +181,7 @@ export default function SyncScreen() {
               </View>
             }
             title={t('sync.ready')}
-            subtitle={longDateTime(cfg.config_fetched_at)}
+            subtitle={mediumDateTime(cfg.config_fetched_at)}
           />
         </SectionCard>
 

@@ -71,6 +71,8 @@ export default {
   'sync.errUnauthorized': 'Clé de configuration invalide.',
   'sync.errServer': 'Erreur du serveur ({status}).',
   'sync.errNotConfigured': 'Synchronisation non configurée. Récupère d’abord la configuration.',
+  'sync.errInvalidSnapshot': 'La copie du cloud est illisible. Aucune donnée n’a été remplacée.',
+  'sync.errGeneric': 'Une erreur est survenue. Réessaie.',
 
   /* --------------------------- Sauvegarde Google -------------------------- */
   'backup.alertTitle': 'Sauvegarde Google',
@@ -103,6 +105,9 @@ export default {
   'backup.errSignin': 'Session Google expirée. Reconnecte-toi avec ton compte Google.',
   'backup.errServer': 'Erreur Google Drive ({status}).',
   'backup.errNoBackup': 'Aucune sauvegarde trouvée sur ton Google Drive.',
+  'backup.errDrive': 'Erreur Google Drive.',
+  'backup.errInvalidBackup': 'La sauvegarde Google Drive est illisible. Aucune donnée n’a été remplacée.',
+  'backup.errGeneric': 'Une erreur est survenue. Réessaie.',
 
   /* ------------------------------- À propos ------------------------------ */
   'about.version': 'Version {v}',
@@ -116,5 +121,6 @@ export default {
   'about.noNotes': 'Aucune note de version',
   'about.links': 'Liens',
   'about.website': 'Site web',
-  'about.source': 'Code source GitHub',
+  'about.source': 'Code source',
+  'about.sourceHost': 'GitHub',
 }

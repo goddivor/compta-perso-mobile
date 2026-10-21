@@ -25,16 +25,22 @@ import {
   FREQUENCIES,
 } from '../backup/googleDrive'
 
-// Clean message for a BackupError (never crashes, never shows raw values)
-function errorMessage(t, e) {
+// A backup refused before anything is replaced: the data layer's plain
+// Error('Invalid snapshot: ...'), or an unreadable Drive file during restore
+const isInvalidSnapshot = (e) => /^invalid snapshot/i.test(String(e?.message || ''))
+
+// Translated message for any error (never crashes, never shows a raw message)
+function errorMessage(t, e, action) {
+  if (isInvalidSnapshot(e)) return t('backup.errInvalidBackup')
+  if (action === 'restore' && e?.code === 'server' && !e.status) return t('backup.errInvalidBackup')
   switch (e?.code) {
     case 'not_configured': return t('backup.errNotConfigured')
     case 'play_services': return t('backup.errPlayServices')
     case 'offline': return t('backup.errOffline')
     case 'signin_required': return t('backup.errSignin')
-    case 'server': return t('backup.errServer', { status: e.status || '?' })
+    case 'server': return e.status ? t('backup.errServer', { status: e.status }) : t('backup.errDrive')
     case 'no_backup': return t('backup.errNoBackup')
-    default: return e?.message || t('common.error')
+    default: return t('backup.errGeneric')
   }
 }
 
@@ -91,7 +97,7 @@ export default function GoogleBackupScreen() {
     try {
       await fn()
     } catch (e) {
-      if (e?.code !== 'cancelled') setError(errorMessage(t, e))
+      if (e?.code !== 'cancelled') setError(errorMessage(t, e, name))
     } finally {
       setBusy('')
     }
@@ -181,6 +187,7 @@ export default function GoogleBackupScreen() {
             title={account.name || account.email}
             subtitle={account.name ? account.email : ''}
             chevron={false}
+            wrap
           />
         </SectionCard>
 
@@ -231,7 +238,7 @@ export default function GoogleBackupScreen() {
             title={t('backup.restore')}
             onPress={() => setConfirm('restore')}
             loading={busy === 'restore'}
-            disabled={disabled}
+            disabled={disabled || !driveFile}
             chevron={false}
           />
         </SectionCard>
