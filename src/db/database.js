@@ -247,26 +247,38 @@ export function listAccounts() {
   `)
 }
 
-// operator_id (optional): registry operator id, e.g. 'tg-mixx-by-yas'
+// operator_id (optional): registry operator id, e.g. 'tg-mixx-by-yas'.
+// fees_rate (optional, a fraction): creates the account's percent fee rule,
+// in the same SQL transaction (see setPercentRule). Throws on a bad rate.
 export function createAccount({ name, type, provider, initial_balance, color, fees_rate, operator_id }) {
   const d = getDb()
-  const r = d.runSync(
-    'INSERT INTO accounts (name,type,provider,initial_balance,currency,color,fees_rate,operator_id) VALUES (?,?,?,?,?,?,?,?)',
-    [name, type, provider || null, initial_balance || 0, 'FCFA', color || '#3B82F6', fees_rate ?? null, operator_id || null]
-  )
-  d.runSync('UPDATE accounts SET position = ? WHERE id = ?', [r.lastInsertRowId, r.lastInsertRowId])
-  return r.lastInsertRowId
+  let id = null
+  d.withTransactionSync(() => {
+    id = d.runSync(
+      'INSERT INTO accounts (name,type,provider,initial_balance,currency,color,fees_rate,operator_id) VALUES (?,?,?,?,?,?,NULL,?)',
+      [name, type, provider || null, initial_balance || 0, 'FCFA', color || '#3B82F6', operator_id || null]
+    ).lastInsertRowId
+    d.runSync('UPDATE accounts SET position = ? WHERE id = ?', [id, id])
+    if (fees_rate != null && fees_rate !== '') setPercentRule(d, id, fees_rate)
+  })
+  return id
 }
 
 // color, fees_rate and operator_id are optional: undefined keeps the
 // stored value (the v2 form has no colour field and edits fee rules apart).
+// A sent fees_rate goes to the account's first percent fee rule (updated,
+// created, or deleted for null), in the same SQL transaction; fees_rate then
+// mirrors that rule, as desktop accounts:update does. Throws on a bad rate.
 export function updateAccount({ id, name, provider, initial_balance, color, fees_rate, operator_id }) {
+  const d = getDb()
   const sets = ['name=?', 'provider=?', 'initial_balance=?']
   const params = [name, provider || null, initial_balance || 0]
   if (color !== undefined) { sets.push('color=?'); params.push(color) }
-  if (fees_rate !== undefined) { sets.push('fees_rate=?'); params.push(fees_rate ?? null) }
   if (operator_id !== undefined) { sets.push('operator_id=?'); params.push(operator_id || null) }
-  getDb().runSync(`UPDATE accounts SET ${sets.join(', ')} WHERE id=?`, [...params, id])
+  d.withTransactionSync(() => {
+    d.runSync(`UPDATE accounts SET ${sets.join(', ')} WHERE id=?`, [...params, id])
+    if (fees_rate !== undefined) setPercentRule(d, id, fees_rate)
+  })
 }
 
 // Links an account to a registry operator (null unlinks it)
@@ -343,16 +355,28 @@ function feeRuleFields({ kind, value, tiers }) {
   if (!FEE_RULE_KINDS.includes(kind)) throw new Error(`Invalid fee rule kind: ${kind}`)
   if (kind === 'tiers') {
     const list = parseTiers(tiers)
+    // Each tier is [max, fee]: both numbers >= 0, every max distinct
     const ok = list && list.length > 0 && list.every(
-      (t) => Array.isArray(t) && t.length === 2 && Number.isFinite(Number(t[0])) && Number.isFinite(Number(t[1]))
+      (t) => Array.isArray(t) && t.length === 2 &&
+        isNonNegative(t[0]) && isNonNegative(t[1])
     )
     if (!ok) throw new Error('Invalid fee rule tiers')
     const sorted = list.map((t) => [Number(t[0]), Number(t[1])]).sort((a, b) => a[0] - b[0])
+    if (sorted.some((t, i) => i > 0 && t[0] === sorted[i - 1][0])) throw new Error('Invalid fee rule tiers: duplicate max')
     return { value: null, tiers: JSON.stringify(sorted) }
   }
+  if (!isNonNegative(value)) throw new Error('Invalid fee rule value')
   const n = Number(value)
-  if (value == null || value === '' || !Number.isFinite(n) || n < 0) throw new Error('Invalid fee rule value')
+  // A percent is a fraction: 1 = 100 %, nothing above
+  if (kind === 'percent' && n > 1) throw new Error('Invalid fee rule value: percent above 1')
   return { value: n, tiers: null }
+}
+
+// A finite number >= 0 (null, '' and non-numeric strings are refused)
+function isNonNegative(v) {
+  if (v == null || v === '' || typeof v === 'boolean') return false
+  const n = Number(v)
+  return Number.isFinite(n) && n >= 0
 }
 
 // accounts.fees_rate = value of the account's first percent rule, or NULL
@@ -362,6 +386,35 @@ function syncFeesRate(d, account_id) {
     [account_id]
   )
   d.runSync('UPDATE accounts SET fees_rate=? WHERE id=?', [first ? first.value : null, account_id])
+}
+
+// Writes an account's fees_rate (a fraction) to its first percent rule, as
+// desktop setPercentRule does: a rate updates that rule or appends one (name
+// NULL) at the end of the account's rules; null or '' deletes it. fees_rate
+// then mirrors the (new) first percent rule. Same bounds as desktop (a rate
+// >= 0) so the v1 account form keeps working. Call inside a transaction.
+function setPercentRule(d, account_id, rate) {
+  const empty = rate == null || rate === ''
+  if (!empty && !isNonNegative(rate)) throw new Error('Invalid fee rate')
+  const first = d.getFirstSync(
+    "SELECT id FROM fee_rules WHERE account_id=? AND kind='percent' ORDER BY position, id LIMIT 1",
+    [account_id]
+  )
+  if (!empty) {
+    const value = Number(rate)
+    if (first) {
+      d.runSync('UPDATE fee_rules SET value=? WHERE id=?', [value, first.id])
+    } else {
+      const { p } = d.getFirstSync('SELECT COALESCE(MAX(position), -1) + 1 AS p FROM fee_rules WHERE account_id=?', [account_id])
+      d.runSync(
+        "INSERT INTO fee_rules (account_id, name, kind, value, tiers, position) VALUES (?, NULL, 'percent', ?, NULL, ?)",
+        [account_id, value, p]
+      )
+    }
+  } else if (first) {
+    d.runSync('DELETE FROM fee_rules WHERE id=?', [first.id])
+  }
+  syncFeesRate(d, account_id)
 }
 
 // Rules of one account (or of every account when account_id is null),
@@ -415,8 +468,10 @@ export function deleteFeeRule(id) {
 export function feeFromRule(rule, base) {
   const b = Number(base)
   if (!rule || !Number.isFinite(b) || b <= 0) return null
-  if (rule.kind === 'percent') return Number.isFinite(Number(rule.value)) ? Math.round(b * Number(rule.value)) : null
-  if (rule.kind === 'fixed') return Number.isFinite(Number(rule.value)) ? Math.round(Number(rule.value)) : null
+  // A missing value (null, '') is no suggestion, not a 0 fee
+  const v = rule.value == null || rule.value === '' ? NaN : Number(rule.value)
+  if (rule.kind === 'percent') return Number.isFinite(v) ? Math.round(b * v) : null
+  if (rule.kind === 'fixed') return Number.isFinite(v) ? Math.round(v) : null
   if (rule.kind === 'tiers') {
     const tiers = parseTiers(rule.tiers)
     if (!tiers) return null
@@ -435,9 +490,12 @@ export function feeFromRule(rule, base) {
 // "uncategorized". `p` is the twin joined on t.transfer_pair_id.
 const EFF_CATEGORY = 'COALESCE(t.category_id, p.category_id)'
 
-// Filters: account_ids ([] = all) + accounts_exclude, type,
-// category_ids ([] = all, may contain 'none' = uncategorized) +
-// categories_exclude, date_from, date_to.
+// Filters (the shape of utils/filters.toQuery()): account_ids ([] = all) +
+// accounts_exclude, type ('DEBIT' | 'CREDIT'), category_ids ([] = all, may
+// contain 'none' = uncategorized) + categories_exclude, date_from, date_to,
+// transfers_only (true = transfer legs only: rows with a transfer_pair_id).
+// Rows carry account_type ('ELECTRONIC' | 'PHYSICAL') next to the account
+// labels.
 // Category filters and the displayed category_name/color all use the
 // EFFECTIVE category, so both legs of a categorized transfer match.
 export function listTransactions(filters = {}) {
@@ -479,12 +537,13 @@ export function listTransactions(filters = {}) {
   }
 
   if (filters.type) { where.push('t.type = ?'); params.push(filters.type) }
+  if (filters.transfers_only) where.push('t.transfer_pair_id IS NOT NULL')
   if (filters.date_from) { where.push('date(t.date) >= ?'); params.push(filters.date_from) }
   if (filters.date_to) { where.push('date(t.date) <= ?'); params.push(filters.date_to) }
 
   return getDb().getAllSync(`
     SELECT t.*,
-      a.name AS account_name, a.color AS account_color, a.operator_id AS account_operator_id,
+      a.name AS account_name, a.type AS account_type, a.color AS account_color, a.operator_id AS account_operator_id,
       c.name AS category_name, c.color AS category_color, c.icon AS category_icon
     FROM transactions t
     LEFT JOIN transactions p ON p.id = t.transfer_pair_id
@@ -733,11 +792,19 @@ export function getDailyReport({ account_id, date_from, date_to } = {}) {
 
 /* ---------------------- Daily opening / closing ------------------------ */
 
+// Day of a transaction for the day balances. A date SQLite cannot parse
+// (e.g. '2026-8-6') falls back on its first 10 characters, then on the day
+// it was recorded (created_at), so every row the current balance counts is
+// placed on a day. `x` is the table alias.
+const txDay = (x) => `COALESCE(date(${x}.date), date(substr(${x}.date, 1, 10)), date(${x}.created_at))`
+
 // Opening and closing balances of each day that has real movements, newest
 // first. Closing of day J = current balance − every movement after J;
 // opening = closing − the day's net. Real rows only (forecast excluded);
 // amounts are signed with fees included, so a transfer moves the total by
-// its fees only. Days without movement are not listed.
+// its fees only. Days without movement are not listed. A row with an
+// unparseable date is placed by txDay(); one with no usable date at all
+// (never written by this app) stays in the opening of the oldest day.
 //   from, to: 'YYYY-MM-DD' bounds (optional, inclusive)
 //   accountIds: only these accounts ([] or undefined = all)
 //   excludeAccountIds: drop these accounts
@@ -757,16 +824,17 @@ export function dayBalances({ from, to, accountIds, excludeAccountIds } = {}) {
   if (!accounts.length) return []
 
   const ids = accounts.map((a) => a.id)
-  const where = ['forecast_session_id IS NULL', `account_id IN (${ids.map(() => '?').join(',')})`, 'date(date) IS NOT NULL']
+  const day = txDay('t')
+  const where = ['t.forecast_session_id IS NULL', `t.account_id IN (${ids.map(() => '?').join(',')})`, `${day} IS NOT NULL`]
   const params = [...ids]
   // Movements after `to` are needed to walk back from the current balance
-  if (from) { where.push('date(date) >= ?'); params.push(from) }
+  if (from) { where.push(`${day} >= ?`); params.push(from) }
 
   const rows = getDb().getAllSync(`
-    SELECT date(date) AS day, account_id,
-      SUM(CASE WHEN type='CREDIT' THEN amount ELSE -amount END) AS net,
+    SELECT ${day} AS day, t.account_id AS account_id,
+      SUM(CASE WHEN t.type='CREDIT' THEN t.amount ELSE -t.amount END) AS net,
       COUNT(*) AS n
-    FROM transactions
+    FROM transactions t
     WHERE ${where.join(' AND ')}
     GROUP BY day, account_id
     ORDER BY day DESC
@@ -841,7 +909,7 @@ export function getForecastSession(id) {
 
   const transactions = d.getAllSync(`
     SELECT t.*,
-      a.name AS account_name, a.color AS account_color, a.operator_id AS account_operator_id,
+      a.name AS account_name, a.type AS account_type, a.color AS account_color, a.operator_id AS account_operator_id,
       c.name AS category_name, c.color AS category_color, c.icon AS category_icon
     FROM transactions t
     LEFT JOIN transactions p ON p.id = t.transfer_pair_id
