@@ -4,14 +4,14 @@ export default {
   /* ------------------------------ Catégories ----------------------------- */
   'categories.empty': 'Aucune catégorie',
   'categories.edit': 'Modifier',
-  'categories.deleteTitle': 'Supprimer la catégorie ?',
-  'categories.deleteMsg': '« {name} » sera supprimée. Les transactions liées perdront leur catégorie.',
+  'categories.deleteTitle': 'Supprimer la catégorie ?',
+  'categories.deleteMsg': '« {name} » sera supprimée. Les transactions liées perdront leur catégorie.',
 
   /* ------------------------- Formulaire catégorie ------------------------ */
   'categoryForm.title': 'Nouvelle catégorie',
   'categoryForm.editTitle': 'Modifier la catégorie',
   'categoryForm.name': 'Nom',
-  'categoryForm.namePlaceholder': 'ex : Internet',
+  'categoryForm.namePlaceholder': 'ex : Internet',
   'categoryForm.flow': 'Sens du flux',
   'categoryForm.both': 'Débit et crédit',
   'categoryForm.color': 'Couleur',

@@ -2,7 +2,7 @@
 // a grid, or none = the initial), flow (DEBIT/CREDIT/BOTH) and colour.
 // With `route.params.id` the existing category is loaded and updated;
 // without it a new one is created.
-import { useEffect, useLayoutEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { View, Text, ScrollView, Pressable, StyleSheet } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import Ionicons from '@expo/vector-icons/Ionicons'
@@ -110,6 +110,7 @@ export default function CategoryFormScreen({ navigation, route }) {
   const [category, setCategory] = useState(null)
   const [form, setForm] = useState({ name: '', flow: 'DEBIT', color: COLORS[0], icon: null })
   const [confirming, setConfirming] = useState(false)
+  const leaving = useRef(false) // "Enregistrer" already ran: a second tap cannot create twice
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }))
 
   useEffect(() => {
@@ -130,9 +131,13 @@ export default function CategoryFormScreen({ navigation, route }) {
   const palette = COLORS.includes(form.color) ? COLORS : [form.color, ...COLORS]
 
   const save = () => {
+    if (leaving.current) return
+    leaving.current = true
     const data = { name: form.name.trim(), flow: form.flow, color: form.color, icon: form.icon || null }
-    if (category) updateCategory({ id: category.id, ...data })
-    else createCategory(data)
+    try {
+      if (category) updateCategory({ id: category.id, ...data })
+      else createCategory(data)
+    } catch (e) { leaving.current = false; throw e }
     refresh()
     navigation.goBack()
   }
