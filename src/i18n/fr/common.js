@@ -8,12 +8,12 @@ export default {
   'common.validate': 'Valider',
   'common.error': 'Erreur',
   'common.reset': 'Réinitialiser',
-  'common.choose': '— Choisir —',
+  'common.choose': 'Choisir',
   'common.electronic': 'Électronique',
   'common.cash': 'Espèces',
 
   /* ---------------------------- App / racine ---------------------------- */
-  'app.dbError': 'Erreur base de données : {message}',
+  'app.dbError': 'Erreur de base de données : {message}',
 
   /* --------------------------- Onglets / titres -------------------------- */
   'tabs.home': 'Accueil',
@@ -46,7 +46,7 @@ export default {
 
   /* ------------------------------ Mise à jour ---------------------------- */
   'updater.title': 'Mise à jour disponible (v{v})',
-  'updater.message': 'Une nouvelle version de Compta Perso est disponible. Voulez-vous la télécharger ?',
+  'updater.message': 'Une nouvelle version de Compta Perso est disponible. Voulez-vous la télécharger ?',
   'updater.later': 'Plus tard',
   'updater.download': 'Télécharger',
   'update.title': 'Nouvelle version v{v}',
@@ -54,11 +54,11 @@ export default {
   'update.noNotes': 'Aucune note de version disponible.',
   'update.downloadInstall': 'Télécharger et installer',
   'update.later': 'Plus tard',
-  'update.downloading': 'Téléchargement en cours… {pct}%',
-  'update.installing': "Ouverture de l'installateur Android…",
-  'update.installHint': "Android peut demander d'autoriser l'application à installer des applications inconnues.",
+  'update.downloading': 'Téléchargement en cours… {pct} %',
+  'update.installing': 'Ouverture de l’installateur Android…',
+  'update.installHint': 'Android peut demander d’autoriser l’application à installer des applications inconnues.',
   'update.errDownload': 'Le téléchargement a échoué. Vérifie ta connexion internet.',
-  'update.errInstall': "L'installation n'a pas pu démarrer. Ouverture de la page de téléchargement…",
+  'update.errInstall': 'L’installation n’a pas pu démarrer. Ouverture de la page de téléchargement…',
 
   /* ------------------------- v2 shared components ----------------------- */
   'common.add': 'Ajouter',

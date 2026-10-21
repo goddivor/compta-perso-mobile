@@ -8,7 +8,7 @@ export default {
   'common.validate': 'Confirm',
   'common.error': 'Error',
   'common.reset': 'Reset',
-  'common.choose': '— Select —',
+  'common.choose': 'Select',
   'common.electronic': 'Electronic',
   'common.cash': 'Cash',
 
