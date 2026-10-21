@@ -2,17 +2,16 @@
 // Only the unit owning this area edits this file (and its twin en/stats.js).
 export default {
   /* -------------------------------- Stats -------------------------------- */
-  'stats.title': 'Stats',
-  'stats.balanceHistory': 'Évolution du solde',
-  'stats.account': 'Compte',
-  'stats.notEnoughData': 'Pas assez de données pour tracer la courbe.',
-  'stats.currentBalance': 'Solde actuel : ',
+  'stats.title': 'Statistiques',
+  'stats.all': 'Tous',
+  'stats.allAccounts': 'Tous les comptes',
+  'stats.balance': 'Solde',
+  'stats.scope': '{account} · {period}',
   'stats.expensesByCategory': 'Dépenses par catégorie',
-  'stats.noExpenses': 'Aucune dépense sur la période.',
   'stats.noCategory': 'Sans catégorie',
-  'stats.total': 'Total',
-  'stats.monthlyFlow': 'Entrées / Sorties par mois',
+  'stats.percent': '{n} %',
+  'stats.monthlyFlow': 'Entrées et sorties par mois',
   'stats.income': 'Entrées',
   'stats.expenses': 'Sorties',
-  'stats.noTransactions': 'Aucune transaction pour le moment.',
+  'stats.empty': 'Aucune donnée',
 }

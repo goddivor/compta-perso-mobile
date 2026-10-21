@@ -1,44 +1,100 @@
-// Stats tab: classic charts built with react-native-gifted-charts.
-// Three cards: balance history (smoothed area line, per account), expenses
-// by category (donut + full clickable legend — every category listed, a
-// tap filters the Transactions list on it) and monthly income vs expenses
-// (grouped bars). All colors come from the theme tokens.
+// Stats tab (v2): account chips with logos and a segmented period on top,
+// then three panels. Balance = one ink line (a balance is not a debit),
+// scoped by the chips; expenses by category = a horizontal ranking (red
+// bars, the category icon carries the identity; a tap filters Transactions
+// on it); income vs expenses by month = grouped bars (green / red).
+// Account chips only scope the balance: the ranking and the monthly bars
+// always cover every account. Empty panels are left out; with no account the
+// whole screen is one centred empty state.
 import { useCallback, useMemo, useState } from 'react'
 import { View, Text, ScrollView, Pressable, ActivityIndicator, useWindowDimensions, StyleSheet } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import Ionicons from '@expo/vector-icons/Ionicons'
-import { LineChart, PieChart, BarChart } from 'react-native-gifted-charts'
-import { useTheme, fonts } from '../theme/tokens'
+import { LineChart, BarChart } from 'react-native-gifted-charts'
+import { useTheme, fonts, radius } from '../theme/tokens'
 import { listAccounts, getBalanceHistory, getExpensesByCategory, getMonthlyFlow } from '../db/database'
-import { fmt, today, shiftDay, monthShortLabel } from '../utils/format'
+import { fmtNumber, getFormatLocale, today, shiftDay, monthShortLabel } from '../utils/format'
 import { useTick } from '../context/AppContext'
 import { useFilters, emptyFilters } from '../context/FiltersContext'
 import { useFocusData } from '../hooks/useFocusData'
 import { useT } from '../i18n'
-import { Card, Segmented, SectionTitle, EmptyState, Dot } from '../components/ui'
-import { FilterChip } from '../components/FilterChip'
+import { Amount, CategoryIcon, EmptyState } from '../components/v2'
+import { AccountChips } from '../graph/AccountChips'
+import { PeriodSeg } from '../graph/PeriodSeg'
 
-const NO_CATEGORY_COLOR = '#6B7280'
+const MAX_POINTS = 60 // chart points; longer windows are sampled by day
 
-function periodFrom(period) {
-  const t = today()
-  if (period === '7d') return shiftDay(t, -6)
-  if (period === '30d') return shiftDay(t, -29)
-  return undefined
+function windowFrom(period) {
+  const now = today()
+  if (period === '7d') return shiftDay(now, -6)
+  if (period === '30d') return shiftDay(now, -29)
+  if (period === 'month') return now.slice(0, 8) + '01'
+  return null
 }
 
 // Compact FCFA amounts for chart axes (12k, 1,5M…)
 function compact(n) {
   const abs = Math.abs(n)
-  if (abs >= 1e6) return (n / 1e6).toFixed(1).replace('.0', '').replace('.', ',') + 'M'
+  if (abs >= 1e6) return new Intl.NumberFormat(getFormatLocale(), { maximumFractionDigits: 1 }).format(n / 1e6) + 'M'
   if (abs >= 1e3) return Math.round(n / 1e3) + 'k'
   return String(Math.round(n))
 }
 
-function dayLabel(iso) {
-  if (!iso) return ''
-  const [, m, d] = iso.split('-')
-  return `${d}/${m}`
+function axisDate(iso) {
+  const d = new Date(iso + 'T00:00:00')
+  return isNaN(d.getTime()) ? '' : d.toLocaleDateString(getFormatLocale(), { day: 'numeric', month: 'short' })
+}
+
+// Balance of the given accounts, day by day from `from` (null = their first
+// day) to today: [{ date, value }], sampled to MAX_POINTS. Each account's
+// curve comes from getBalanceHistory (its balance after each active day); a
+// day with no movement keeps the last balance.
+function balanceSeries(accs, from) {
+  const now = today()
+  const curves = accs.map((a) => {
+    const pts = getBalanceHistory(a.id).map((p) => ({ date: p.date || '0000-00-00', balance: p.balance }))
+    // the opening point can be dated after a back-dated transaction
+    if (pts.length > 1 && pts[0].date > pts[1].date) pts[0].date = pts[1].date
+    return pts
+  })
+  const valueAt = (pts, day) => {
+    let v = pts[0].balance
+    for (const p of pts) {
+      if (p.date <= day) v = p.balance
+      else break
+    }
+    return v
+  }
+  let start = from
+  if (!start) {
+    start = curves.reduce((m, c) => (c.length && c[0].date < m ? c[0].date : m), now)
+    if (start < '1970-01-01') start = now
+  }
+  if (start > now) start = now
+  const span = Math.round((new Date(now + 'T00:00:00') - new Date(start + 'T00:00:00')) / 86400000)
+  const step = Math.max(1, Math.ceil(span / (MAX_POINTS - 1)))
+  const days = []
+  for (let i = 0; i < span; i += step) days.push(shiftDay(start, i))
+  days.push(now)
+  if (days.length < 2) days.unshift(shiftDay(now, -1))
+  return days.map((date) => ({
+    date,
+    value: curves.reduce((s, pts) => (pts.length ? s + valueAt(pts, date) : s), 0),
+  }))
+}
+
+function Panel({ children }) {
+  const { colors } = useTheme()
+  return <View style={[styles.panel, { backgroundColor: colors.surface }]}>{children}</View>
+}
+
+function PanelHead({ title, sub }) {
+  const { colors } = useTheme()
+  return (
+    <View style={styles.head}>
+      <Text style={{ fontFamily: fonts.semibold, fontSize: 15, color: colors.ink }}>{title}</Text>
+      {sub ? <Text style={{ fontFamily: fonts.regular, fontSize: 12, color: colors.muted }} numberOfLines={1}>{sub}</Text> : null}
+    </View>
+  )
 }
 
 export default function StatsScreen({ navigation }) {
@@ -46,69 +102,87 @@ export default function StatsScreen({ navigation }) {
   const t = useT()
   const tick = useTick()
   const { setFilters } = useFilters()
-  const PERIODS = [
-    { label: t('period.7d'), value: '7d' },
-    { label: t('period.30d'), value: '30d' },
-    { label: t('period.all'), value: '' },
-  ]
   const { width: winW } = useWindowDimensions()
-  // screen padding 20×2 + card padding 16×2
-  const chartW = winW - 40 - 32
+  // screen padding 16×2 + panel padding 16×2
+  const chartW = winW - 64
+
+  const periods = useMemo(
+    () => [
+      { value: '7d', label: t('period.7d') },
+      { value: '30d', label: t('period.30d') },
+      { value: 'month', label: t('period.month') },
+      { value: 'all', label: t('period.all') },
+    ],
+    [t]
+  )
 
   const [accounts, setAccounts] = useState([])
-  const [accountId, setAccountId] = useState(null)
-  const [history, setHistory] = useState([])
+  const [sel, setSel] = useState(null) // account ids for the balance; null = not chosen yet (first account)
+  const [period, setPeriod] = useState('30d')
+  const [series, setSeries] = useState([])
   const [expenses, setExpenses] = useState([])
   const [monthly, setMonthly] = useState([])
-  const [period, setPeriod] = useState('30d')
+
+  const from = windowFrom(period)
 
   const { loading } = useFocusData(() => {
     const accs = listAccounts()
     setAccounts(accs)
-    const accId = accountId ?? accs[0]?.id ?? null
-    if (accountId == null && accId != null) setAccountId(accId)
-    setHistory(accId != null ? getBalanceHistory(accId) : [])
-    setExpenses(getExpensesByCategory({ date_from: periodFrom(period) }))
+    let ids = (sel ?? []).filter((id) => accs.some((a) => a.id === id))
+    if (sel === null && accs.length) {
+      ids = [accs[0].id]
+      setSel(ids)
+    }
+    const scope = ids.length ? accs.filter((a) => ids.includes(a.id)) : accs
+    setSeries(accs.length ? balanceSeries(scope, from) : [])
+    setExpenses(getExpensesByCategory({ date_from: from || undefined }).filter((e) => e.total > 0))
     setMonthly(getMonthlyFlow())
-  }, [accountId, period, tick])
+  }, [sel, period, tick])
 
-  const account = accounts.find((a) => String(a.id) === String(accountId))
-  const accountColor = account?.color || colors.link
+  const selected = useMemo(() => (sel ?? []).filter((id) => accounts.some((a) => a.id === id)), [sel, accounts])
+  const scopeAccounts = selected.length ? accounts.filter((a) => selected.includes(a.id)) : accounts
+  const scopeName =
+    selected.length === 0
+      ? t('stats.allAccounts')
+      : scopeAccounts.map((a) => a.name).join(', ')
+  const periodLabel = periods.find((p) => p.value === period)?.label
+  const currentBalance = scopeAccounts.reduce((s, a) => s + a.current_balance, 0)
 
-  /* ----------------------- Balance history (line) ----------------------- */
-  const lineData = useMemo(() => {
-    const n = history.length
-    if (!n) return []
-    // ~4 readable, evenly spaced date labels
-    const step = Math.max(1, Math.ceil(n / 4))
-    return history.map((p, i) => ({
-      value: p.balance,
-      label: i % step === 0 || i === n - 1 ? dayLabel(p.date) : undefined,
-    }))
-  }, [history])
+  /* ----------------------------- Balance (line) --------------------------- */
+  const line = useMemo(() => {
+    const n = series.length
+    if (n < 2) return null
+    const values = series.map((p) => p.value)
+    const min = Math.min(...values)
+    const max = Math.max(...values)
+    const span = max - min || Math.abs(max) * 0.1 || 1000
+    // the axis starts under the lowest point (not at zero), so a dip stays visible
+    const unit = Math.pow(10, Math.floor(Math.log10(span)))
+    const base = Math.floor((min - span * 0.15) / unit) * unit
+    const mid = Math.floor((n - 1) / 2)
+    return {
+      base,
+      data: series.map((p, i) => ({
+        value: p.value - base,
+        label: i === 0 || i === mid || i === n - 1 ? axisDate(p.date) : '',
+      })),
+    }
+  }, [series])
 
-  /* ---------------------- Expenses by category (pie) --------------------- */
+  /* ------------------------- Expenses by category -------------------------- */
   const totalExpenses = useMemo(() => expenses.reduce((s, e) => s + e.total, 0), [expenses])
-  // The donut only draws the shares > 0; the legend lists everything
-  const pieData = useMemo(
-    () =>
-      expenses
-        .filter((e) => e.total > 0)
-        .map((e) => ({ value: e.total, color: e.color || NO_CATEGORY_COLOR })),
-    [expenses]
-  )
+  const maxExpense = expenses.length ? expenses[0].total : 0
 
-  // Legend tap: filter the Transactions list on that category (or on the
-  // uncategorized special value) and jump to the tab
+  // Row tap: Transactions filtered on that category (or on uncategorized), same window
   const goToCategory = useCallback(
     (categoryId) => {
-      setFilters({ ...emptyFilters, category_ids: [categoryId == null ? 'none' : categoryId] })
+      setFilters({ ...emptyFilters, category_ids: [categoryId == null ? 'none' : categoryId], date_from: from })
       navigation.navigate('TransactionsTab')
     },
-    [setFilters, navigation]
+    [setFilters, navigation, from]
   )
 
-  /* ------------------------ Monthly flow (bars) -------------------------- */
+  /* --------------------------- Monthly flow (bars) ------------------------- */
   const shownMonths = useMemo(() => monthly.slice(-8), [monthly])
   const barData = useMemo(() => {
     const out = []
@@ -128,19 +202,19 @@ export default function StatsScreen({ navigation }) {
   const barW = Math.max(8, Math.min(18, Math.floor(chartW / (shownMonths.length * 3.4 || 1))))
 
   const axisStyle = {
-    yAxisTextStyle: { color: colors.faint, fontSize: 9, fontFamily: fonts.regular },
+    yAxisTextStyle: { color: colors.muted, fontSize: 9, fontFamily: fonts.regular },
     xAxisLabelTextStyle: { color: colors.muted, fontSize: 9, fontFamily: fonts.regular },
     yAxisColor: colors.line,
     xAxisColor: colors.line,
     rulesColor: colors.line,
-    formatYLabel: (l) => compact(Number(l)),
-    noOfSections: 4,
+    rulesType: 'dashed',
+    noOfSections: 3,
     yAxisLabelWidth: 34,
   }
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={['top']}>
-      <View style={styles.header}>
+      <View style={styles.appbar}>
         <Text style={{ fontFamily: fonts.extrabold, fontSize: 24, color: colors.ink }}>{t('stats.title')}</Text>
       </View>
 
@@ -148,172 +222,125 @@ export default function StatsScreen({ navigation }) {
         <View style={styles.center}>
           <ActivityIndicator size="small" color={colors.primary600} />
         </View>
+      ) : accounts.length === 0 ? (
+        <EmptyState icon="stats-chart-outline" title={t('stats.empty')} />
       ) : (
-        <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 30, gap: 16 }}>
-          {/* ------------------- Balance history ------------------- */}
-          <Card style={styles.card}>
-            <View style={styles.cardHeader}>
-              <SectionTitle style={{ fontSize: 16 }}>{t('stats.balanceHistory')}</SectionTitle>
-              <FilterChip
-                label={account?.name || t('stats.account')}
-                active={!!account}
-                value={accountId ?? ''}
-                onChange={(v) => setAccountId(v)}
-                options={accounts.map((a) => ({ label: a.name, value: a.id, color: a.color }))}
-              />
-            </View>
-            {lineData.length < 2 ? (
-              <EmptyState icon="trending-up-outline" text={t('stats.notEnoughData')} />
-            ) : (
-              <LineChart
-                data={lineData}
-                width={chartW - 40}
-                height={180}
-                adjustToWidth
-                curved
-                thickness={2.5}
-                color={accountColor}
-                areaChart
-                startFillColor={accountColor}
-                endFillColor={accountColor}
-                startOpacity={0.25}
-                endOpacity={0.02}
-                hideDataPoints={lineData.length > 12}
-                dataPointsColor={accountColor}
-                dataPointsRadius={3}
-                initialSpacing={8}
-                endSpacing={8}
-                {...axisStyle}
-              />
-            )}
-            {account ? (
-              <Text style={{ fontFamily: fonts.medium, fontSize: 12, color: colors.muted }}>
-                {t('stats.currentBalance')}<Text style={{ fontFamily: fonts.bold, color: colors.ink }}>{fmt(account.current_balance)}</Text>
-              </Text>
-            ) : null}
-          </Card>
+        <>
+          <AccountChips accounts={accounts} selected={selected} onChange={setSel} allLabel={t('stats.all')} />
+          <View style={{ height: 12 }} />
+          <PeriodSeg options={periods} value={period} onChange={setPeriod} />
+          <ScrollView contentContainerStyle={styles.stack}>
+            {/* ----------------------------- Balance ---------------------------- */}
+            <Panel>
+              <PanelHead title={t('stats.balance')} sub={t('stats.scope', { account: scopeName, period: periodLabel })} />
+              <Amount value={currentBalance} size={22} weight="bold" style={{ marginBottom: 10 }} />
+              {line ? (
+                <LineChart
+                  data={line.data}
+                  width={chartW - 40}
+                  height={140}
+                  adjustToWidth
+                  thickness={2.5}
+                  color={colors.ink}
+                  areaChart
+                  startFillColor={colors.ink}
+                  endFillColor={colors.ink}
+                  startOpacity={0.12}
+                  endOpacity={0.01}
+                  hideDataPoints
+                  initialSpacing={4}
+                  endSpacing={4}
+                  formatYLabel={(l) => compact(Number(l) + line.base)}
+                  {...axisStyle}
+                />
+              ) : null}
+            </Panel>
 
-          {/* ---------------- Expenses by category ----------------- */}
-          <Card style={styles.card}>
-            <View style={styles.cardHeader}>
-              <SectionTitle style={{ fontSize: 16 }}>{t('stats.expensesByCategory')}</SectionTitle>
-            </View>
-            <Segmented segments={PERIODS} value={period} onChange={setPeriod} />
-            {expenses.length === 0 ? (
-              <EmptyState icon="pie-chart-outline" text={t('stats.noExpenses')} />
-            ) : (
-              <>
-                {pieData.length === 0 ? (
-                  <EmptyState icon="pie-chart-outline" text={t('stats.noExpenses')} />
-                ) : (
-                  <View style={{ alignItems: 'center', marginVertical: 6 }}>
-                    <PieChart
-                      data={pieData}
-                      donut
-                      radius={92}
-                      innerRadius={60}
-                      innerCircleColor={colors.surface}
-                      strokeWidth={2}
-                      strokeColor={colors.surface}
-                      centerLabelComponent={() => (
-                        <View style={{ alignItems: 'center' }}>
-                          <Text style={{ fontFamily: fonts.regular, fontSize: 10, color: colors.muted }}>{t('stats.total')}</Text>
-                          <Text style={{ fontFamily: fonts.bold, fontSize: 13, color: colors.ink }}>
-                            {fmt(totalExpenses)}
-                          </Text>
-                        </View>
-                      )}
-                    />
-                  </View>
-                )}
+            {/* ------------------------- Expenses by category ------------------- */}
+            {expenses.length > 0 ? (
+              <Panel>
+                <PanelHead title={t('stats.expensesByCategory')} />
+                <Amount value={totalExpenses} size={22} weight="bold" color={colors.danger} style={{ marginBottom: 12 }} />
                 <View style={{ gap: 4 }}>
                   {expenses.map((e) => (
                     <Pressable
                       key={e.category_id == null ? 'none' : e.category_id}
                       onPress={() => goToCategory(e.category_id)}
-                      style={({ pressed }) => [
-                        styles.legendRow,
-                        styles.legendPressable,
-                        pressed && { backgroundColor: colors.surface2 },
-                      ]}
+                      style={({ pressed }) => [styles.rank, pressed && { backgroundColor: colors.surface2 }]}
                     >
-                      <Dot color={e.color || NO_CATEGORY_COLOR} size={9} />
-                      <Text style={{ flex: 1, fontFamily: fonts.medium, fontSize: 12.5, color: colors.ink }} numberOfLines={1}>
-                        {e.category_id == null ? t('stats.noCategory') : e.name}
-                      </Text>
-                      <Text style={{ fontFamily: fonts.regular, fontSize: 11, color: colors.muted }}>
-                        {totalExpenses > 0 ? Math.round((e.total / totalExpenses) * 100) : 0}%
-                      </Text>
-                      <Text style={{ fontFamily: fonts.semibold, fontSize: 12.5, color: colors.content, minWidth: 90, textAlign: 'right' }}>
-                        {fmt(e.total)}
-                      </Text>
-                      <Ionicons name="chevron-forward" size={14} color={colors.faint} />
+                      <CategoryIcon
+                        size={32}
+                        icon={e.category_id == null ? 'help-outline' : e.icon}
+                        name={e.name}
+                        color={e.category_id == null ? colors.muted : e.color}
+                      />
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <View style={styles.rankTop}>
+                          <Text style={{ flex: 1, fontFamily: fonts.medium, fontSize: 13, color: colors.ink }} numberOfLines={1}>
+                            {e.category_id == null ? t('stats.noCategory') : e.name}
+                            <Text style={{ fontFamily: fonts.regular, fontSize: 11, color: colors.muted }}>
+                              {'  ' + t('stats.percent', { n: Math.round((e.total / totalExpenses) * 100) })}
+                            </Text>
+                          </Text>
+                          <Amount value={e.total} size={13} color={colors.danger} />
+                        </View>
+                        <View style={[styles.track, { backgroundColor: colors.surface2 }]}>
+                          <View style={[styles.fill, { width: `${(e.total / maxExpense) * 100}%`, backgroundColor: colors.danger }]} />
+                        </View>
+                      </View>
                     </Pressable>
                   ))}
                 </View>
-              </>
-            )}
-          </Card>
+              </Panel>
+            ) : null}
 
-          {/* ------------------ Monthly income/expenses ------------------ */}
-          <Card style={styles.card}>
-            <View style={styles.cardHeader}>
-              <SectionTitle style={{ fontSize: 16 }}>{t('stats.monthlyFlow')}</SectionTitle>
-            </View>
-            {shownMonths.length === 0 ? (
-              <EmptyState icon="bar-chart-outline" text={t('stats.noTransactions')} />
-            ) : (
-              <>
-                <View style={{ flexDirection: 'row', gap: 16, marginBottom: 4 }}>
-                  <View style={styles.legendRow}>
-                    <Dot color={colors.success} size={9} />
-                    <Text style={{ fontFamily: fonts.medium, fontSize: 11, color: colors.muted }}>{t('stats.income')}</Text>
+            {/* ------------------------- Income / expenses ---------------------- */}
+            {shownMonths.length > 0 ? (
+              <Panel>
+                <PanelHead title={t('stats.monthlyFlow')} />
+                <View style={styles.legend}>
+                  <View style={styles.legendItem}>
+                    <View style={[styles.sw, { backgroundColor: colors.success }]} />
+                    <Text style={{ fontFamily: fonts.regular, fontSize: 12, color: colors.content }}>{t('stats.income')}</Text>
                   </View>
-                  <View style={styles.legendRow}>
-                    <Dot color={colors.danger} size={9} />
-                    <Text style={{ fontFamily: fonts.medium, fontSize: 11, color: colors.muted }}>{t('stats.expenses')}</Text>
+                  <View style={styles.legendItem}>
+                    <View style={[styles.sw, { backgroundColor: colors.danger }]} />
+                    <Text style={{ fontFamily: fonts.regular, fontSize: 12, color: colors.content }}>{t('stats.expenses')}</Text>
                   </View>
                 </View>
                 <BarChart
                   data={barData}
                   width={chartW - 40}
-                  height={170}
+                  height={150}
                   barWidth={barW}
                   spacing={barW * 1.2}
                   initialSpacing={10}
-                  barBorderTopLeftRadius={3}
-                  barBorderTopRightRadius={3}
+                  barBorderTopLeftRadius={4}
+                  barBorderTopRightRadius={4}
                   disableScroll={false}
+                  formatYLabel={(l) => compact(Number(l))}
                   {...axisStyle}
                 />
-              </>
-            )}
-          </Card>
-        </ScrollView>
+              </Panel>
+            ) : null}
+          </ScrollView>
+        </>
       )}
     </SafeAreaView>
   )
 }
 
 const styles = StyleSheet.create({
-  header: { paddingHorizontal: 20, paddingTop: 14, paddingBottom: 10 },
-  card: { padding: 16, gap: 12 },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 10,
-  },
-  legendRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-  },
-  legendPressable: {
-    borderRadius: 8,
-    paddingVertical: 5,
-    paddingHorizontal: 6,
-    marginHorizontal: -6,
-  },
+  appbar: { paddingHorizontal: 16, paddingTop: 14, paddingBottom: 12 },
+  stack: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 30, gap: 12 },
+  panel: { borderRadius: radius.xxl, padding: 16 },
+  head: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 8 },
+  rank: { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: radius.lg, paddingVertical: 6, paddingHorizontal: 6, marginHorizontal: -6 },
+  rankTop: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 6 },
+  track: { height: 8, borderRadius: 4, overflow: 'hidden' },
+  fill: { height: 8, borderRadius: 4 },
+  legend: { flexDirection: 'row', gap: 16, marginBottom: 8 },
+  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  sw: { width: 10, height: 10, borderRadius: 3 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 })
