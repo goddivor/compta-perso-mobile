@@ -10,7 +10,7 @@
 // and deleting keep using the regular helpers (they never touch that column).
 // Fees are ALWAYS typed freely: the account's fee rules are only chips that
 // fill the field when tapped, nothing is applied by default.
-import { useEffect, useLayoutEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { View, Text, TextInput, ScrollView, Pressable, Alert, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import Ionicons from '@expo/vector-icons/Ionicons'
@@ -53,6 +53,84 @@ const emptyForm = {
   description: '',
 }
 
+// --- pure form logic (no React, kept testable) ---
+// v1 stored parseFloat values, so the owner's rows may hold decimals. The
+// fields show whole digits, but an amount the user does not edit is saved
+// EXACTLY as stored: `exact` keeps the stored numbers, and editing a field
+// drops its entry so only a value the user typed is parsed.
+const noExact = { amount: null, fees: null, stored: null }
+
+// Form + exact values of an existing row (`partner`: its transfer leg, if any)
+function rowToForm(row, partner) {
+  if (row.transfer_pair_id) {
+    const debit = row.type === 'DEBIT' ? row : partner
+    const credit = row.type === 'CREDIT' ? row : partner
+    const shownCategory = debit?.category_id ?? credit?.category_id ?? ''
+    const amount = credit?.amount ?? row.amount
+    const fees = debit?.fees || 0
+    return {
+      legs: { debit, credit, shownCategory },
+      exact: { amount, fees, stored: null },
+      form: {
+        account_id: debit?.account_id ?? row.account_id,
+        linked_account_id: credit?.account_id ?? '',
+        mode: 'TRANSFER',
+        amount: digits(Math.round(amount)),
+        fees: fees ? digits(Math.round(fees)) : '',
+        category_id: shownCategory,
+        date: String(row.date || today()).slice(0, 10),
+        description: row.description || '',
+      },
+    }
+  }
+  const fees = row.fees || 0
+  const amount = row.type === 'DEBIT' ? row.amount - fees : row.amount
+  return {
+    legs: null,
+    // `stored`: a debit's stored total, reused as is while neither field is edited
+    exact: { amount, fees, stored: row.type === 'DEBIT' ? row.amount : null },
+    form: {
+      account_id: row.account_id,
+      linked_account_id: '',
+      mode: row.type,
+      amount: digits(Math.round(amount)),
+      fees: fees ? digits(Math.round(fees)) : '',
+      category_id: row.category_id || '',
+      date: String(row.date || today()).slice(0, 10),
+      description: row.description || '',
+    },
+  }
+}
+
+// Amounts to save: { base, fees, stored } (stored = the simple row's amount)
+function formAmounts(form, exact = noExact) {
+  const base = exact.amount != null ? exact.amount : parseInt(form.amount, 10) || 0
+  const fees = exact.fees != null ? exact.fees : parseInt(form.fees, 10) || 0
+  if (form.mode !== 'DEBIT') return { base, fees, stored: base }
+  const untouched = exact.amount != null && exact.fees != null && exact.stored != null
+  return { base, fees, stored: untouched ? exact.stored : base + fees }
+}
+
+// Type switch; a NEW row switched to Entrée drops the fee picked as Dépense
+function switchMode(f, mode, accounts, isNew) {
+  const next = { ...f, mode }
+  if (mode === 'TRANSFER') {
+    const others = accounts.filter((a) => String(a.id) !== String(f.account_id))
+    if (!f.linked_account_id || String(f.linked_account_id) === String(f.account_id)) next.linked_account_id = others[0]?.id ?? ''
+  } else {
+    next.linked_account_id = ''
+  }
+  if (isNew && mode === 'CREDIT') next.fees = ''
+  return next
+}
+
+// Fee chip text: "Retrait · 300", "Transfert 1 % · 100", "1 % · 15"
+function feeChipLabel(rule, fee, pct, fallback) {
+  const name = rule.kind === 'percent' ? [rule.name, pct].filter(Boolean).join(' ') : rule.name || fallback
+  return `${name} · ${fee}`
+}
+// --- end pure form logic ---
+
 export default function TransactionFormScreen({ navigation, route }) {
   const { colors } = useTheme()
   const { t, locale } = useI18n()
@@ -63,6 +141,8 @@ export default function TransactionFormScreen({ navigation, route }) {
   const [accounts, setAccounts] = useState([])
   const [categories, setCategories] = useState([])
   const [form, setForm] = useState(emptyForm)
+  // Stored amounts of the edited row, dropped field by field once edited
+  const [exact, setExact] = useState(noExact)
   const [tx, setTx] = useState(null)
   // Edited transfer: both legs, to keep the credit leg's own category
   const [legs, setLegs] = useState(null) // { debit, credit, shownCategory }
@@ -70,6 +150,8 @@ export default function TransactionFormScreen({ navigation, route }) {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [focus, setFocus] = useState(null)
   const [busy, setBusy] = useState(false)
+  // Synchronous guard: a double tap fires twice before `busy` re-renders
+  const saving = useRef(false)
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }))
 
   useEffect(() => {
@@ -81,34 +163,10 @@ export default function TransactionFormScreen({ navigation, route }) {
       const row = getTransaction(txId)
       setTx(row)
       if (!row) return
-      if (row.transfer_pair_id) {
-        const partner = getTransaction(row.transfer_pair_id)
-        const debit = row.type === 'DEBIT' ? row : partner
-        const credit = row.type === 'CREDIT' ? row : partner
-        const shownCategory = debit?.category_id ?? credit?.category_id ?? ''
-        setLegs({ debit, credit, shownCategory })
-        setForm({
-          account_id: debit?.account_id ?? row.account_id,
-          linked_account_id: credit?.account_id ?? '',
-          mode: 'TRANSFER',
-          amount: digits(Math.round(credit?.amount ?? row.amount)),
-          fees: debit?.fees ? digits(Math.round(debit.fees)) : '',
-          category_id: shownCategory,
-          date: String(row.date || today()).slice(0, 10),
-          description: row.description || '',
-        })
-      } else {
-        setForm({
-          account_id: row.account_id,
-          linked_account_id: '',
-          mode: row.type,
-          amount: digits(Math.round(row.type === 'DEBIT' ? row.amount - (row.fees || 0) : row.amount)),
-          fees: row.fees ? digits(Math.round(row.fees)) : '',
-          category_id: row.category_id || '',
-          date: String(row.date || today()).slice(0, 10),
-          description: row.description || '',
-        })
-      }
+      const loaded = rowToForm(row, row.transfer_pair_id ? getTransaction(row.transfer_pair_id) : null)
+      setLegs(loaded.legs)
+      setExact(loaded.exact)
+      setForm(loaded.form)
     } else {
       setForm({ ...emptyForm, account_id: route.params?.defaultAccountId || accs[0]?.id || '' })
     }
@@ -127,9 +185,13 @@ export default function TransactionFormScreen({ navigation, route }) {
     navigation.setOptions({ title })
   }, [navigation, tx, isTransfer, sessionId, t])
 
-  const baseAmount = parseInt(form.amount, 10) || 0
-  const feesAmt = parseInt(form.fees, 10) || 0
+  const amounts = formAmounts(form, exact)
+  const baseAmount = amounts.base
+  const feesAmt = amounts.fees
   const totalDebit = baseAmount + feesAmt
+  // Editing a field: its typed value is parsed from now on
+  const editAmount = (v) => { setExact((e) => ({ ...e, amount: null, stored: null })); set('amount', digits(v)) }
+  const editFees = (v) => { setExact((e) => ({ ...e, fees: null, stored: null })); set('fees', digits(v)) }
 
   const sameId = (a, b) => String(a) === String(b)
   const currentAccount = accounts.find((a) => sameId(a.id, form.account_id))
@@ -146,18 +208,7 @@ export default function TransactionFormScreen({ navigation, route }) {
     !!form.account_id && baseAmount > 0 && isValidDay(form.date) &&
     (!isTransfer || (!!form.linked_account_id && !sameId(form.linked_account_id, form.account_id)))
 
-  const chooseMode = (mode) => {
-    setForm((f) => {
-      const next = { ...f, mode }
-      if (mode === 'TRANSFER') {
-        const others = accounts.filter((a) => !sameId(a.id, f.account_id))
-        if (!f.linked_account_id || sameId(f.linked_account_id, f.account_id)) next.linked_account_id = others[0]?.id ?? ''
-      } else {
-        next.linked_account_id = ''
-      }
-      return next
-    })
-  }
+  const chooseMode = (mode) => setForm((f) => switchMode(f, mode, accounts, !txId))
 
   const chooseAccount = (id) =>
     setForm((f) => {
@@ -169,7 +220,7 @@ export default function TransactionFormScreen({ navigation, route }) {
   const pctLabel = (value) =>
     t('form.pct', { n: (value * 100).toLocaleString(locale, { maximumFractionDigits: 2 }) })
   const chipLabel = (s) =>
-    `${s.rule.name || (s.rule.kind === 'percent' ? pctLabel(s.rule.value) : feeRuleLabel(s.rule))} · ${fmtNumber(s.fee)}`
+    feeChipLabel(s.rule, fmtNumber(s.fee), s.rule.kind === 'percent' ? pctLabel(s.rule.value) : '', feeRuleLabel(s.rule))
 
   const accountLeading = (a) => (
     <LogoTile operatorId={a.operator_id} name={a.name} color={a.color} icon={a.type === 'PHYSICAL' ? 'cash-outline' : undefined} size={32} />
@@ -189,12 +240,13 @@ export default function TransactionFormScreen({ navigation, route }) {
   )
 
   const save = () => {
-    if (!valid || busy) return
+    if (!valid || busy || saving.current) return
+    saving.current = true
     setBusy(true)
     try {
       const catId = form.category_id ? Number(form.category_id) : null
       const description = form.description.trim() || null
-      const storedAmount = form.mode === 'DEBIT' ? totalDebit : baseAmount
+      const storedAmount = amounts.stored
       const transfer = {
         from_account_id: Number(form.account_id),
         to_account_id: Number(form.linked_account_id),
@@ -266,6 +318,7 @@ export default function TransactionFormScreen({ navigation, route }) {
       refresh()
       navigation.goBack()
     } catch (e) {
+      saving.current = false
       setBusy(false)
       Alert.alert(t('common.error'), e.message)
     }
@@ -321,7 +374,7 @@ export default function TransactionFormScreen({ navigation, route }) {
             <View style={styles.heroRow}>
               <TextInput
                 value={grouped(form.amount)}
-                onChangeText={(v) => set('amount', digits(v))}
+                onChangeText={editAmount}
                 onFocus={() => setFocus('amount')}
                 onBlur={() => setFocus(null)}
                 keyboardType="number-pad"
@@ -428,7 +481,7 @@ export default function TransactionFormScreen({ navigation, route }) {
               <View style={box('fees', styles.feesBox)}>
                 <TextInput
                   value={grouped(form.fees)}
-                  onChangeText={(v) => set('fees', digits(v))}
+                  onChangeText={editFees}
                   onFocus={() => setFocus('fees')}
                   onBlur={() => setFocus(null)}
                   keyboardType="number-pad"
@@ -454,7 +507,7 @@ export default function TransactionFormScreen({ navigation, route }) {
                         key={s.rule.id}
                         label={chipLabel(s)}
                         selected={on}
-                        onPress={() => set('fees', on ? '' : digits(s.fee))}
+                        onPress={() => editFees(on ? '' : String(s.fee))}
                       />
                     )
                   })}
