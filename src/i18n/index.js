@@ -1,4 +1,5 @@
-// Minimal i18n: flat dictionaries (fr = reference, en), simple {x}
+// Minimal i18n: flat dictionaries (fr = reference, en), one file per area
+// under fr/ and en/ (merged by fr.js / en.js), simple {x}
 // interpolation, language persisted in AsyncStorage ('system' | 'fr' | 'en',
 // default 'system'), system detection via expo-localization with a French
 // fallback. The provider also keeps the date/number locale of utils/format
@@ -7,12 +8,31 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { getLocales } from 'expo-localization'
 import { setFormatLocale } from '../utils/format'
-import fr from './fr'
-import en from './en'
+import fr, { areas as frAreas } from './fr'
+import en, { areas as enAreas } from './en'
 
 const LANGUAGE_KEY = 'app_language' // 'system' | 'fr' | 'en'
 const DICTS = { fr, en }
 const LOCALES = { fr: 'fr-FR', en: 'en-US' }
+
+// Development guard for the per-area split: a key defined in two areas, or
+// present in one language only, is reported once at startup.
+if (typeof __DEV__ !== 'undefined' && __DEV__) {
+  for (const [lang, areas] of [['fr', frAreas], ['en', enAreas]]) {
+    const seen = {}
+    for (const [area, dict] of Object.entries(areas)) {
+      for (const k of Object.keys(dict)) {
+        if (seen[k]) console.warn(`i18n: ${lang} key "${k}" defined in both ${seen[k]} and ${area}`)
+        seen[k] = area
+      }
+    }
+  }
+  const onlyIn = (a, b) => Object.keys(a).filter((k) => !(k in b))
+  const missingEn = onlyIn(fr, en)
+  const missingFr = onlyIn(en, fr)
+  if (missingEn.length) console.warn(`i18n: missing in en: ${missingEn.join(', ')}`)
+  if (missingFr.length) console.warn(`i18n: missing in fr: ${missingFr.join(', ')}`)
+}
 
 // Language of the phone, restricted to the supported ones (fallback: fr)
 export function systemLanguage() {

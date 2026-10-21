@@ -9,10 +9,20 @@ export const getFormatLocale = () => locale
 export const fmtNumber = (n) =>
   new Intl.NumberFormat(locale).format(Math.round(n || 0))
 
-export const fmt = (n) => fmtNumber(n) + ' FCFA'
+export const fmt = (n) => fmtNumber(n) + ' FCFA' // CURRENCY_LABEL
 
 export const fmtSigned = (type, n) =>
   (type === 'CREDIT' ? '+' : '-') + fmt(n)
+
+// v2 split form of fmt() for styled amounts (number and a quieter currency
+// suffix): { sign, number, currency }. sign is '+' (CREDIT), '−' (U+2212,
+// DEBIT or a negative balance) or ''. fmt(n) === number + ' ' + currency.
+export const CURRENCY_LABEL = 'FCFA'
+export const fmtParts = (n, type = null) => {
+  const v = Math.round(n || 0)
+  const sign = type === 'CREDIT' ? '+' : type === 'DEBIT' || (!type && v < 0) ? '\u2212' : ''
+  return { sign, number: fmtNumber(Math.abs(v)), currency: CURRENCY_LABEL }
+}
 
 export const fmtDate = (s) =>
   s ? new Date(String(s).slice(0, 10) + 'T00:00:00').toLocaleDateString(locale) : '—'

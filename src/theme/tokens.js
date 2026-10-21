@@ -3,6 +3,7 @@
 // default, but the user can force light or dark from the Settings screen
 // (persisted in AsyncStorage, applied immediately via ThemeProvider).
 // The primary yellow is CONSTANT across themes (brand signature).
+// Amounts: debits use `danger`, credits `success`, balances `ink` (both themes).
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { useColorScheme } from 'react-native'
 import AsyncStorage from '@react-native-async-storage/async-storage'
@@ -29,6 +30,16 @@ export const palettes = {
     warning: '#F59E0B',
     warningSoft: '#FEF3C7',
     link: '#0B5FFF',
+
+    // v2: selected chip, active nav pill, selected menu row
+    primarySoft: '#FFF4BF',
+    // v2: operator logos sit on a white tile in both themes; a white mark
+    // (registry logo.background = 'dark') sits on the dark tile instead
+    logoTile: '#FFFFFF',
+    logoTileDark: '#1A1714',
+    logoTileEdge: 'rgba(0,0,0,0.08)',
+    // v2: dimmed backdrop behind dialogs, menus and sheets
+    scrim: 'rgba(0,0,0,0.45)',
 
     // Bottom tab bar: inactive items stay PURE ink (no washed-out grey),
     // the active item is the distinct brand yellow (darkened for contrast
@@ -58,13 +69,20 @@ export const palettes = {
     warningSoft: '#3A2E14',
     link: '#0B5FFF',
 
+    primarySoft: '#3D3414',
+    logoTile: '#FFFFFF',
+    logoTileDark: '#1A1714',
+    logoTileEdge: 'rgba(0,0,0,0.08)',
+    scrim: 'rgba(0,0,0,0.6)',
+
     // Bottom tab bar: inactive items in PURE white, active in brand yellow
     tabActive: '#FFD200',
     tabInactive: '#FFFFFF',
   },
 }
 
-export const radius = { sm: 6, md: 8, lg: 12, xl: 16 }
+// v2 adds: xxl (cards, balance card), sheet (dialogs and bottom sheets), pill
+export const radius = { sm: 6, md: 8, lg: 12, xl: 16, xxl: 24, sheet: 28, pill: 999 }
 
 export const fonts = {
   regular: 'Poppins_400Regular',
@@ -89,6 +107,15 @@ export const shadowOverlay = {
   shadowOpacity: 0.18,
   shadowRadius: 20,
   elevation: 8,
+}
+
+// v2 floating action button (Material 3 level 3)
+export const shadowFab = {
+  shadowColor: '#000000',
+  shadowOffset: { width: 0, height: 4 },
+  shadowOpacity: 0.22,
+  shadowRadius: 10,
+  elevation: 6,
 }
 
 /* --------------------------- Theme provider ----------------------------- */

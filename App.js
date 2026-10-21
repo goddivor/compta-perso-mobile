@@ -2,6 +2,8 @@
 // navigation tree (bottom tabs + native stack for the form screens).
 // Theme: ThemeProvider (system / forced light / forced dark, persisted).
 // Perf: tabs are lazy and frozen when blurred; inactive screens detached.
+// Onboarding gate: while the profile has no currency, the Onboarding route
+// opens on top of the tabs at launch (owner's upgraded data included).
 import { useEffect, useState } from 'react'
 import { View, Text, Pressable, ActivityIndicator, useColorScheme } from 'react-native'
 import { StatusBar } from 'expo-status-bar'
@@ -21,9 +23,10 @@ import {
 
 import { ThemeProvider, useTheme, fonts, palettes } from './src/theme/tokens'
 import { I18nProvider, useT, t } from './src/i18n'
-import { getDb } from './src/db/database'
+import { getDb, getProfile, listAccounts } from './src/db/database'
 import { AppProvider } from './src/context/AppContext'
 import { FiltersProvider } from './src/context/FiltersContext'
+import { PrivacyProvider } from './src/context/PrivacyContext'
 import FilterScreen from './src/screens/FilterScreen'
 import HomeScreen from './src/screens/HomeScreen'
 import TransactionsScreen from './src/screens/TransactionsScreen'
@@ -42,6 +45,8 @@ import ForecastScreen from './src/screens/ForecastScreen'
 import ForecastSessionScreen from './src/screens/ForecastSessionScreen'
 import AboutScreen from './src/screens/AboutScreen'
 import LanguageScreen from './src/screens/LanguageScreen'
+import OnboardingScreen from './src/screens/OnboardingScreen'
+import FeeRuleFormScreen from './src/screens/FeeRuleFormScreen'
 import UpdateModal from './src/components/UpdateModal'
 import { getStartupUpdate, dismissUpdateVersion } from './src/updates/updater'
 import { maybeAutoBackup } from './src/backup/googleDrive'
@@ -89,9 +94,23 @@ function Tabs() {
   )
 }
 
+// Launch route stack: the tabs, plus Onboarding on top when the profile has
+// no currency (2 steps when accounts exist, 3 with the account step)
+function launchState() {
+  try {
+    if (!getProfile().missing) return undefined
+    const withAccountStep = listAccounts().length === 0
+    return { index: 1, routes: [{ name: 'Tabs' }, { name: 'Onboarding', params: { withAccountStep } }] }
+  } catch (e) {
+    console.warn('onboarding gate: profile read failed', e)
+    return undefined
+  }
+}
+
 function Root() {
   const { colors, isDark } = useTheme()
   const t = useT()
+  const [initialState] = useState(launchState)
 
   // Silent update check (GitHub Releases) shortly after startup: when a
   // newer, non-dismissed version exists, open the in-app update sheet
@@ -144,7 +163,7 @@ function Root() {
   )
 
   return (
-    <NavigationContainer theme={navTheme}>
+    <NavigationContainer theme={navTheme} initialState={initialState}>
       <StatusBar style={isDark ? 'light' : 'dark'} />
       <Stack.Navigator>
         <Stack.Screen name="Tabs" component={Tabs} options={{ headerShown: false }} />
@@ -217,6 +236,16 @@ function Root() {
           options={{ title: t('nav.forecastSession'), ...stackHeader }}
         />
         <Stack.Screen
+          name="Onboarding"
+          component={OnboardingScreen}
+          options={{ title: t('nav.onboarding'), headerShown: false, gestureEnabled: false, contentStyle: { backgroundColor: colors.bg } }}
+        />
+        <Stack.Screen
+          name="FeeRuleForm"
+          component={FeeRuleFormScreen}
+          options={{ title: t('nav.feeRule'), ...stackHeader }}
+        />
+        <Stack.Screen
           name="About"
           component={AboutScreen}
           options={{ title: t('nav.about'), ...stackHeader }}
@@ -284,7 +313,9 @@ export default function App() {
         <I18nProvider>
           <AppProvider>
             <FiltersProvider>
-              <Root />
+              <PrivacyProvider>
+                <Root />
+              </PrivacyProvider>
             </FiltersProvider>
           </AppProvider>
         </I18nProvider>
