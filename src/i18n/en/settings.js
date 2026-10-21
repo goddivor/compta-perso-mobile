@@ -70,6 +70,8 @@ export default {
   'sync.errUnauthorized': 'Invalid configuration key.',
   'sync.errServer': 'Server error ({status}).',
   'sync.errNotConfigured': 'Sync is not configured. Fetch the configuration first.',
+  'sync.errInvalidSnapshot': 'The cloud copy is unreadable. No data was replaced.',
+  'sync.errGeneric': 'Something went wrong. Try again.',
 
   /* ----------------------------- Google backup --------------------------- */
   'backup.alertTitle': 'Google backup',
@@ -101,6 +103,9 @@ export default {
   'backup.errSignin': 'Google session expired. Sign in again with your Google account.',
   'backup.errServer': 'Google Drive error ({status}).',
   'backup.errNoBackup': 'No backup found on your Google Drive.',
+  'backup.errDrive': 'Google Drive error.',
+  'backup.errInvalidBackup': 'The Google Drive backup is unreadable. No data was replaced.',
+  'backup.errGeneric': 'Something went wrong. Try again.',
 
   /* -------------------------------- About -------------------------------- */
   'about.version': 'Version {v}',
@@ -114,5 +119,6 @@ export default {
   'about.noNotes': 'No release notes',
   'about.links': 'Links',
   'about.website': 'Website',
-  'about.source': 'Source code on GitHub',
+  'about.source': 'Source code',
+  'about.sourceHost': 'GitHub',
 }

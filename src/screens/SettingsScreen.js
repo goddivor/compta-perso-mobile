@@ -90,6 +90,7 @@ export default function SettingsScreen({ navigation }) {
             title={t('settings.googleBackup')}
             subtitle={googleAccount?.email || ''}
             onPress={() => navigation.navigate('GoogleBackup')}
+            wrap
           />
         </SectionCard>
 
