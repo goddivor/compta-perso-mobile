@@ -4,6 +4,7 @@
 // With ONE account filtered, the strip is that account's and every row shows
 // the balance after it. A transfer is ONE row (pair). Search and the type /
 // category filters describe a subset of the day, so the balance strips fade.
+// The account chips stay usable during a search (search AND accounts).
 // No delete here (the form owns it). Adding is the bare Fab.
 // Perf: data loads after the transition (useFocusData), memoized day cards.
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
@@ -375,7 +376,9 @@ export default function TransactionsScreen({ navigation, route }) {
           ) : null}
         </View>
 
-        {accounts.length > 0 && !q ? (
+        {/* Kept while searching: the list is the search term AND the account
+            selection (rows come account-filtered, the term filters them) */}
+        {accounts.length > 0 ? (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.chips}>
             <Chip label={t('tx.allAccounts')} selected={!filteredAccounts} onPress={pickAll} />
             {accounts.map((a) => (
