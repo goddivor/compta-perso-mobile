@@ -1,7 +1,7 @@
 // "À propos" sub-screen (v2): identity, update status + check against GitHub
 // Releases, the latest release notes (sub-titles and grey bullets) and links.
 import { useEffect, useMemo, useState } from 'react'
-import { View, Text, ScrollView, ActivityIndicator, Linking, StyleSheet } from 'react-native'
+import { View, Text, ScrollView, ActivityIndicator, Linking, Pressable, StyleSheet } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import Ionicons from '@expo/vector-icons/Ionicons'
 import { useTheme, fonts, radius } from '../theme/tokens'
@@ -109,17 +109,10 @@ export default function AboutScreen() {
           </Text>
         </View>
 
-        <SectionCard title={t('about.updates')}>
-          {statusRow}
-          {statusRow ? <RowSeparator /> : null}
-          <SettingsRow
-            icon="refresh-outline"
-            title={t('about.check')}
-            onPress={runCheck}
-            loading={checking}
-            chevron={false}
-          />
-        </SectionCard>
+        <View style={{ gap: 10 }}>
+          <SectionCard title={t('about.updates')}>{statusRow}</SectionCard>
+          <TonalButton icon="refresh" label={t('about.check')} onPress={runCheck} loading={checking} />
+        </View>
 
         <SectionCard title={t('about.whatsNew')}>
           <View style={{ padding: 16, gap: 8 }}>
@@ -156,7 +149,12 @@ export default function AboutScreen() {
         <SectionCard title={t('about.links')}>
           <SettingsRow icon="globe-outline" title={t('about.website')} onPress={() => openLink(WEBSITE_URL)} />
           <RowSeparator />
-          <SettingsRow icon="logo-github" title={t('about.source')} onPress={() => openLink(GITHUB_URL)} />
+          <SettingsRow
+            icon="logo-github"
+            title={t('about.source')}
+            subtitle={t('about.sourceHost')}
+            onPress={() => openLink(GITHUB_URL)}
+          />
         </SectionCard>
       </ScrollView>
 
@@ -167,6 +165,29 @@ export default function AboutScreen() {
         onClose={() => setShowUpdate(false)}
       />
     </SafeAreaView>
+  )
+}
+
+// Full-width tonal button (mockup .btn-tonal); spinner while busy
+function TonalButton({ icon, label, onPress, loading }) {
+  const { colors } = useTheme()
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={loading}
+      accessibilityRole="button"
+      accessibilityState={{ busy: loading }}
+      style={({ pressed }) => [styles.tonal, { backgroundColor: pressed ? colors.line : colors.surface2 }]}
+    >
+      {loading ? (
+        <ActivityIndicator size="small" color={colors.ink} />
+      ) : (
+        <>
+          <Ionicons name={icon} size={20} color={colors.ink} />
+          <Text style={{ fontFamily: fonts.semibold, fontSize: 15, color: colors.ink }}>{label}</Text>
+        </>
+      )}
+    </Pressable>
   )
 }
 
@@ -182,4 +203,14 @@ const styles = StyleSheet.create({
   logo: { width: 68, height: 68, borderRadius: radius.xl + 4, alignItems: 'center', justifyContent: 'center' },
   statusTile: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   dot: { width: 6, height: 6, borderRadius: 3, marginTop: 8 },
+  tonal: {
+    marginHorizontal: 16,
+    height: 52,
+    borderRadius: 26,
+    paddingHorizontal: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
 })
