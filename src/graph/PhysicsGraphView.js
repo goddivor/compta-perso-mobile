@@ -1,36 +1,40 @@
 // Transaction graph, "chronological columns" layout (react-native-svg).
 // One vertical column per selected account (ordered by account position,
-// ~220 units apart), headed by an account node. ALL transactions of the
+// ~220 units apart), headed by the account's LogoTile (an RN overlay that
+// follows the pan / zoom). ALL transactions of the
 // selected accounts are merged chronologically; each one gets a global row
 // (row height ~90), so time flows downward and every account reads like a
 // queue. Transfer pairs whose two sides are visible share the SAME row and
-// are linked debit -> credit by a primary-yellow arrow across the columns.
-// Each node shows the FULL signed amount (green/red, Intl-formatted for the
-// active language) with the dd/mm date below; the circle radius adapts to
-// the text width so the amount always fits.
+// are linked debit -> credit by a dashed yellow arrow across the columns.
+// Each node is ringed and written in the colour of its sign (debit red,
+// credit green) and shows the FULL signed amount (Intl-formatted for the
+// active language) with the dd/mm date below and the category under the
+// circle; the radius adapts to the text width so the amount always fits.
 //
+// The account selection comes from the parent (`accountIds`, [] = all) and
+// the parent's recenter button bumps `recenterKey`.
 // The canvas is a free space: pan / pinch-zoom / double-tap with a plain
-// PanResponder (no extra native dependency), recenter button, detail card.
+// PanResponder (no extra native dependency), detail card.
 // Perf: row assignment cached per account selection, and the SVG only
 // renders the rows inside the visible window (± margin), recomputed on
 // gesture release and on a ~150 ms throttle while panning.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { View, Text, Pressable, ScrollView, PanResponder, StyleSheet } from 'react-native'
+import { View, Text, PanResponder, StyleSheet } from 'react-native'
 import Svg, { G, Line, Path, Circle, Text as SvgText } from 'react-native-svg'
-import Ionicons from '@expo/vector-icons/Ionicons'
 import { useTheme, fonts, radius, shadowOverlay } from '../theme/tokens'
 import { listAccounts, listTransactionsForGraph } from '../db/database'
-import { fmt, fmtSigned, fmtNumber, fmtDate } from '../utils/format'
+import { fmt, fmtNumber, fmtDate } from '../utils/format'
 import { useTick } from '../context/AppContext'
 import { useFocusData } from '../hooks/useFocusData'
 import { useI18n } from '../i18n'
-import { EmptyState, Dot } from '../components/ui'
+import { Amount, EmptyState, LogoTile } from '../components/v2'
 
 const MIN_SCALE = 0.3
 const MAX_SCALE = 4
 const MIN_R = 22
 const MAX_R = 46
 const HEADER_R = 24
+const TILE = 40 // header logo tile, graph units
 const AMOUNT_FS = 11 // font size of the in-node amount
 const CHAR_W = 0.62 // approx. SVG glyph width, as a fraction of the font size
 
@@ -54,15 +58,6 @@ function radiusForLabel(label) {
   return clamp((label.length * AMOUNT_FS * CHAR_W) / 2 + 10, MIN_R, MAX_R)
 }
 
-// Ink on light node colors, white on dark ones (luminance cut)
-function contrastText(hex) {
-  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex) || '')
-  if (!m) return '#FFFFFF'
-  const v = parseInt(m[1], 16)
-  const lum = 0.299 * ((v >> 16) & 255) + 0.587 * ((v >> 8) & 255) + 0.114 * (v & 255)
-  return lum > 160 ? '#1A1714' : '#FFFFFF'
-}
-
 // Straight edge trimmed to the node borders + a small arrow head at the target
 function edgeGeometry(p1, p2, r1, r2) {
   const dx = p2.x - p1.x
@@ -84,14 +79,16 @@ function edgeGeometry(p1, p2, r1, r2) {
   }
 }
 
-export default function PhysicsGraphView() {
+export default function PhysicsGraphView({ accountIds = [], recenterKey = 0 }) {
   const { colors } = useTheme()
   const { t, locale } = useI18n()
   const tick = useTick()
 
   const [accounts, setAccounts] = useState([])
   const [txs, setTxs] = useState([])
-  const [selectedIds, setSelectedIds] = useState(null) // null = all accounts
+  const idsKey = accountIds.join(',')
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const selectedIds = useMemo(() => (accountIds.length ? [...accountIds] : null), [idsKey]) // null = all accounts
   const [selectedId, setSelectedId] = useState(null) // selected node (detail card)
 
   const { loading } = useFocusData(() => {
@@ -99,15 +96,8 @@ export default function PhysicsGraphView() {
     setTxs(listTransactionsForGraph()) // every transaction, oldest first
   }, [tick])
 
-  // Toggle chips: tap an account to show/hide its column, "All" resets
-  const toggleAccount = useCallback((id) => {
-    setSelectedIds((cur) => {
-      if (cur === null) return [id] // from "all" to this single account
-      const next = cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]
-      return next.length === 0 ? null : next
-    })
-    setSelectedId(null)
-  }, [])
+  // A new account selection closes the detail card
+  useEffect(() => setSelectedId(null), [idsKey])
 
   /* --------------------- Chronological columns layout --------------------- */
 
@@ -171,7 +161,7 @@ export default function PhysicsGraphView() {
     for (const tx of visibleTxs) {
       const row = rowById.get(tx.id)
       // Full signed amount (Intl for the active language), never compacted
-      const label = (tx.type === 'CREDIT' ? '+' : '-') + fmtNumber(tx.amount)
+      const label = (tx.type === 'CREDIT' ? '+' : '\u2212') + fmtNumber(tx.amount)
       push({
         id: `t${tx.id}`,
         kind: 'tx',
@@ -183,6 +173,7 @@ export default function PhysicsGraphView() {
         r: radiusForLabel(label),
         label,
         dateLabel: shortDay(tx.date),
+        catLabel: tx.category_name ? (tx.category_name.length > 14 ? tx.category_name.slice(0, 13) + '\u2026' : tx.category_name) : '',
         // Transfer whose partner account is hidden: chevron indicator
         hiddenTransfer: !!tx.transfer_pair_id && !txById.has(tx.transfer_pair_id),
       })
@@ -199,7 +190,7 @@ export default function PhysicsGraphView() {
       let prevRow = -1
       for (const tx of column) {
         const row = rowById.get(tx.id)
-        edges.push({ from: prev, to: `t${tx.id}`, kind: 'chain', color: a.color, rowMin: prevRow, rowMax: row })
+        edges.push({ from: prev, to: `t${tx.id}`, kind: 'chain', rowMin: prevRow, rowMax: row })
         prev = `t${tx.id}`
         prevRow = row
       }
@@ -322,6 +313,14 @@ export default function PhysicsGraphView() {
   }, [model])
 
   const recenter = useCallback(() => animateTo(homeTransform()), [animateTo, homeTransform])
+
+  // The parent's recenter button
+  const recenterSeen = useRef(recenterKey)
+  useEffect(() => {
+    if (recenterSeen.current === recenterKey) return
+    recenterSeen.current = recenterKey
+    recenter()
+  }, [recenterKey, recenter])
 
   // Back to the top view whenever the layout (data/selection) changes
   useEffect(() => {
@@ -504,7 +503,7 @@ export default function PhysicsGraphView() {
       if (!a || !b) continue
       const geo = edgeGeometry({ x: a.x, y: a.y }, { x: b.x, y: b.y }, a.r, b.r)
       const isTransfer = e.kind === 'transfer'
-      const stroke = isTransfer ? colors.primary : e.color
+      const stroke = isTransfer ? colors.primary600 : colors.faint
       els.push(
         <G key={`e${i}`}>
           <Line
@@ -526,47 +525,12 @@ export default function PhysicsGraphView() {
       if (node.row < min || node.row > max) continue // outside the window
       const selected = node.id === selectedId
 
-      if (node.kind === 'header') {
-        // Account header: colored circle with the initial + name below
-        const name = node.account.name || '?'
-        els.push(
-          <G key={node.id}>
-            <Circle
-              cx={node.x}
-              cy={node.y}
-              r={node.r}
-              fill={node.account.color}
-              stroke={selected ? colors.ink : colors.surface}
-              strokeWidth={selected ? 3.5 : 2.5}
-            />
-            <SvgText
-              x={node.x}
-              y={node.y + 5.5}
-              fontSize={16}
-              fontFamily={fonts.semibold}
-              fill={contrastText(node.account.color)}
-              textAnchor="middle"
-            >
-              {name.trim().charAt(0).toUpperCase()}
-            </SvgText>
-            <SvgText
-              x={node.x}
-              y={node.y + node.r + 15}
-              fontSize={10}
-              fontFamily={fonts.semibold}
-              fill={colors.ink}
-              textAnchor="middle"
-            >
-              {name}
-            </SvgText>
-          </G>
-        )
-        continue
-      }
+      if (node.kind === 'header') continue // drawn as an RN overlay (LogoTile)
 
       // Full signed amount + dd/mm date, two centered lines inside a
-      // surface-filled disc ringed with the account color (readable in
-      // light and dark, amount green/red like the desktop app)
+      // surface-filled disc ringed with the colour of the sign (debit red,
+      // credit green), the category under the disc
+      const tone = node.tx.type === 'CREDIT' ? colors.success : colors.danger
       els.push(
         <G key={node.id}>
           <Circle
@@ -574,7 +538,7 @@ export default function PhysicsGraphView() {
             cy={node.y}
             r={node.r}
             fill={colors.surface}
-            stroke={selected ? colors.ink : node.account.color}
+            stroke={selected ? colors.ink : tone}
             strokeWidth={selected ? 3.5 : 2.5}
           />
           <SvgText
@@ -582,7 +546,7 @@ export default function PhysicsGraphView() {
             y={node.y - 1.5}
             fontSize={AMOUNT_FS}
             fontFamily={fonts.bold}
-            fill={node.tx.type === 'CREDIT' ? colors.success : colors.danger}
+            fill={tone}
             textAnchor="middle"
           >
             {node.label}
@@ -597,11 +561,23 @@ export default function PhysicsGraphView() {
           >
             {node.dateLabel}
           </SvgText>
+          {node.catLabel ? (
+            <SvgText
+              x={node.x}
+              y={node.y + node.r + 13}
+              fontSize={9}
+              fontFamily={fonts.regular}
+              fill={colors.muted}
+              textAnchor="middle"
+            >
+              {node.catLabel}
+            </SvgText>
+          ) : null}
           {node.hiddenTransfer ? (
             // Transfer whose partner account is not displayed
             <Path
               d={`M${node.x + node.r + 5},${node.y - 6} l 7,6 l -7,6`}
-              stroke={colors.primary}
+              stroke={colors.primary600}
               strokeWidth={2.5}
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -616,72 +592,13 @@ export default function PhysicsGraphView() {
 
   const selectedNode = selectedId ? model.nodeById.get(selectedId) : null
 
+  const headers = model.nodes.filter((n) => n.kind === 'header')
+  const sc = view.scale
+
   return (
     <View style={{ flex: 1 }}>
-      {/* Multi-select account chips ("All" + one per account) */}
-      <View style={styles.filters}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.chipRow}
-        >
-          <Pressable
-            onPress={() => {
-              setSelectedIds(null)
-              setSelectedId(null)
-            }}
-            style={[
-              styles.chip,
-              {
-                backgroundColor: selectedIds === null ? colors.primary : colors.surface,
-                borderColor: selectedIds === null ? colors.primary : colors.line,
-              },
-            ]}
-          >
-            <Text
-              style={{
-                fontFamily: selectedIds === null ? fonts.semibold : fonts.medium,
-                fontSize: 12,
-                color: selectedIds === null ? colors.primaryInk : colors.content,
-              }}
-            >
-              {t('graph.allChip')}
-            </Text>
-          </Pressable>
-          {accounts.map((a) => {
-            const active = selectedIds !== null && selectedIds.includes(a.id)
-            return (
-              <Pressable
-                key={a.id}
-                onPress={() => toggleAccount(a.id)}
-                style={[
-                  styles.chip,
-                  {
-                    backgroundColor: active ? colors.primary : colors.surface,
-                    borderColor: active ? colors.primary : colors.line,
-                  },
-                ]}
-              >
-                <Dot color={a.color} size={8} />
-                <Text
-                  numberOfLines={1}
-                  style={{
-                    fontFamily: active ? fonts.semibold : fonts.medium,
-                    fontSize: 12,
-                    color: active ? colors.primaryInk : colors.content,
-                    maxWidth: 110,
-                  }}
-                >
-                  {a.name}
-                </Text>
-              </Pressable>
-            )
-          })}
-        </ScrollView>
-      </View>
-
       {!loading && model.cols === 0 ? (
-        <EmptyState icon="git-network-outline" text={t('graph.empty')} />
+        <EmptyState icon="git-network-outline" title={t('graph.empty')} />
       ) : (
         <View style={{ flex: 1 }}>
           {/* Free zoomable/pannable space */}
@@ -697,20 +614,36 @@ export default function PhysicsGraphView() {
                 <G transform={`translate(${view.tx}, ${view.ty}) scale(${view.scale})`}>{content}</G>
               </Svg>
             ) : null}
+            {/* Account headers: the logo tile follows the pan / zoom */}
+            {size.w > 0
+              ? headers.map((h) => (
+                  <View
+                    key={h.id}
+                    pointerEvents="none"
+                    style={[
+                      styles.header,
+                      {
+                        left: view.tx + (h.x - 60) * sc,
+                        top: view.ty + (h.y - TILE / 2) * sc,
+                        width: 120 * sc,
+                      },
+                    ]}
+                  >
+                    <LogoTile
+                      size={Math.round(TILE * sc)}
+                      operatorId={h.account.operator_id}
+                      name={h.account.name}
+                      color={h.account.color}
+                      icon={h.account.type === 'PHYSICAL' ? 'cash-outline' : undefined}
+                      style={h.id === selectedId ? { borderWidth: 2, borderColor: colors.ink } : undefined}
+                    />
+                    <Text numberOfLines={1} style={{ marginTop: 3 * sc, fontFamily: fonts.medium, fontSize: Math.max(8, 10 * sc), color: colors.muted }}>
+                      {h.account.name}
+                    </Text>
+                  </View>
+                ))
+              : null}
           </View>
-
-          {/* Floating recenter button (back to the top of the timeline) */}
-          <Pressable
-            onPress={recenter}
-            accessibilityLabel={t('graph.recenter')}
-            style={({ pressed }) => [
-              styles.recenter,
-              shadowOverlay,
-              { backgroundColor: pressed ? colors.primary600 : colors.primary },
-            ]}
-          >
-            <Ionicons name="locate" size={22} color={colors.primaryInk} />
-          </Pressable>
 
           {/* Bottom detail card for the selected node */}
           {selectedNode ? (
@@ -721,8 +654,14 @@ export default function PhysicsGraphView() {
                 { backgroundColor: colors.surface, borderColor: colors.line },
               ]}
             >
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
-                <Dot color={selectedNode.account.color} size={9} />
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <LogoTile
+                  size={20}
+                  operatorId={selectedNode.account.operator_id}
+                  name={selectedNode.account.name}
+                  color={selectedNode.account.color}
+                  icon={selectedNode.account.type === 'PHYSICAL' ? 'cash-outline' : undefined}
+                />
                 <Text style={{ fontFamily: fonts.medium, fontSize: 12, color: colors.muted, flex: 1 }} numberOfLines={1}>
                   {selectedNode.account.name}
                 </Text>
@@ -730,33 +669,20 @@ export default function PhysicsGraphView() {
                   {selectedNode.kind === 'tx' ? fmtDate(selectedNode.tx.date) : t('graph.initialBalance')}
                 </Text>
               </View>
-              <Text style={{ fontFamily: fonts.semibold, fontSize: 14, color: colors.ink }} numberOfLines={2}>
-                {selectedNode.kind === 'tx'
-                  ? selectedNode.tx.description || selectedNode.tx.category_name || t('graph.noDescription')
-                  : selectedNode.account.name}
-              </Text>
-              <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8 }}>
-                <Text
-                  style={{
-                    fontFamily: fonts.bold,
-                    fontSize: 16,
-                    color:
-                      selectedNode.kind === 'tx'
-                        ? selectedNode.tx.type === 'CREDIT'
-                          ? colors.success
-                          : colors.danger
-                        : selectedNode.account.initial_balance < 0
-                          ? colors.danger
-                          : colors.success,
-                  }}
-                >
-                  {selectedNode.kind === 'tx'
-                    ? fmtSigned(selectedNode.tx.type, selectedNode.tx.amount)
-                    : fmt(selectedNode.account.initial_balance)}
+              {selectedNode.kind === 'tx' ? (
+                <Text style={{ fontFamily: fonts.semibold, fontSize: 14, color: colors.ink }} numberOfLines={2}>
+                  {selectedNode.tx.description || selectedNode.tx.category_name || t('graph.noDescription')}
                 </Text>
+              ) : null}
+              <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8 }}>
+                {selectedNode.kind === 'tx' ? (
+                  <Amount value={selectedNode.tx.amount} type={selectedNode.tx.type} size={16} weight="bold" />
+                ) : (
+                  <Amount value={selectedNode.account.initial_balance} size={16} weight="bold" />
+                )}
                 {selectedNode.kind === 'tx' && selectedNode.tx.fees > 0 ? (
                   <Text style={{ fontFamily: fonts.regular, fontSize: 12, color: colors.muted }}>
-                    {t('tx.inclFees', { amount: fmt(selectedNode.tx.fees) })}
+                    {t('common.feesIncluded', { amount: fmt(selectedNode.tx.fees) })}
                   </Text>
                 ) : null}
               </View>
@@ -769,35 +695,7 @@ export default function PhysicsGraphView() {
 }
 
 const styles = StyleSheet.create({
-  filters: {
-    paddingHorizontal: 20,
-    paddingBottom: 10,
-  },
-  chipRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingRight: 6,
-  },
-  chip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    minHeight: 34,
-  },
-  recenter: {
-    position: 'absolute',
-    right: 16,
-    top: 8,
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  header: { position: 'absolute', alignItems: 'center' },
   detail: {
     position: 'absolute',
     left: 16,
