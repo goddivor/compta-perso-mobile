@@ -161,7 +161,7 @@ export default function SyncScreen() {
         <EmptyState
           icon="cloud-offline-outline"
           title={t('sync.notConfigured')}
-          action={{ label: t('sync.fetchConfig'), onPress: busy ? undefined : doFetchConfig, icon: 'cloud-download-outline' }}
+          action={{ label: t('sync.fetchConfig'), onPress: busy ? undefined : doFetchConfig, icon: 'cloud-download-outline', busy: busy === 'config' }}
         />
         {syncError ? <ErrorBox text={syncError} /> : null}
       </SafeAreaView>
