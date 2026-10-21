@@ -173,9 +173,12 @@ function seedDefaults() {
 }
 
 // Built-in categories without an icon get theirs. Only empty icons are
-// filled; a category the user gave an icon keeps it.
-function backfillCategoryIcons(d) {
-  const rows = d.getAllSync("SELECT id, name FROM categories WHERE icon IS NULL OR icon = ''")
+// filled; a category the user gave an icon keeps it. `onlyIds` (optional)
+// limits the fill to those category ids (a restore passes the rows its
+// snapshot sent without an icon field).
+function backfillCategoryIcons(d, onlyIds) {
+  let rows = d.getAllSync("SELECT id, name FROM categories WHERE icon IS NULL OR icon = ''")
+  if (onlyIds) rows = rows.filter((row) => onlyIds.has(row.id))
   for (const row of rows) {
     const icon = BUILTIN_CATEGORY_ICONS[normalizeName(row.name)]
     if (icon) d.runSync('UPDATE categories SET icon=? WHERE id=?', [icon, row.id])
@@ -568,6 +571,39 @@ export function listTransactions(filters = {}) {
     WHERE ${where.join(' AND ')}
     ORDER BY t.date DESC, t.created_at DESC, t.id DESC
     LIMIT 500
+  `, params)
+}
+
+// Transfers counted as ONE operation per day, for the Report's operation
+// count (dayBalances().count counts rows, so both legs). A pair counts when
+// both legs are real, on the same day (txDay, as dayBalances) and in the
+// selected accounts. No row limit. Same options as dayBalances:
+//   from, to: 'YYYY-MM-DD' bounds (optional, inclusive)
+//   accountIds: only these accounts ([] or undefined = all)
+// → [{ day, pairs }], newest first, days without a pair not listed
+export function transferPairsByDay({ from, to, accountIds } = {}) {
+  const day = txDay('t')
+  const where = [
+    "t.type = 'CREDIT'",
+    't.forecast_session_id IS NULL',
+    'p.forecast_session_id IS NULL',
+    `${day} = ${txDay('p')}`,
+  ]
+  const params = []
+  if (accountIds && accountIds.length) {
+    const marks = accountIds.map(() => '?').join(',')
+    where.push(`t.account_id IN (${marks})`, `p.account_id IN (${marks})`)
+    params.push(...accountIds.map(Number), ...accountIds.map(Number))
+  }
+  if (from) { where.push(`${day} >= ?`); params.push(from) }
+  if (to) { where.push(`${day} <= ?`); params.push(to) }
+  return getDb().getAllSync(`
+    SELECT ${day} AS day, COUNT(*) AS pairs
+    FROM transactions t
+    JOIN transactions p ON p.id = t.transfer_pair_id
+    WHERE ${where.join(' AND ')}
+    GROUP BY day
+    ORDER BY day DESC
   `, params)
 }
 
@@ -1000,6 +1036,9 @@ export const SYNC_TABLES = ['accounts', 'categories', 'transactions', 'forecast_
 // Tables every snapshot, old or new, must carry as arrays
 const CORE_SYNC_TABLES = ['accounts', 'categories', 'transactions', 'forecast_sessions']
 
+// err.code of the error restoreAllData throws for an unusable payload
+export const INVALID_SNAPSHOT = 'INVALID_SNAPSHOT'
+
 // True when a payload is a usable snapshot (the four v1 tables are arrays)
 export function isValidSnapshot(data) {
   return !!data && typeof data === 'object' && CORE_SYNC_TABLES.every((t) => Array.isArray(data[t]))
@@ -1051,10 +1090,17 @@ function insertRows(d, table, rows) {
 // Old snapshots (v1 clients, or a server without the v2 tables):
 // - no profile rows → the local profile is kept (not wiped);
 // - no fee_rules → each account with a fees_rate gets its percent rule back;
-// - built-in categories without an icon get theirs.
-// A payload without the four v1 tables throws before anything is deleted.
+// - built-in categories sent WITHOUT an icon field (the snapshot predates
+//   the icon column) get theirs; a category sent with icon null (the user
+//   chose "no icon") is restored as it is.
+// A payload without the four v1 tables throws before anything is deleted:
+// Error('Invalid snapshot: nothing restored') with err.code INVALID_SNAPSHOT.
 export function restoreAllData(data) {
-  if (!isValidSnapshot(data)) throw new Error('Invalid snapshot: nothing restored')
+  if (!isValidSnapshot(data)) {
+    const err = new Error('Invalid snapshot: nothing restored')
+    err.code = INVALID_SNAPSHOT
+    throw err
+  }
   const d = getDb()
   const payload = data
   // A snapshot profile counts only when it carries a currency; it is
@@ -1079,7 +1125,12 @@ export function restoreAllData(data) {
       }
       d.runSync('INSERT OR IGNORE INTO profile (id) VALUES (1)')
       backfillFeeRules(d)
-      backfillCategoryIcons(d)
+      const noIconField = new Set(
+        payload.categories
+          .filter((c) => c && typeof c === 'object' && !('icon' in c))
+          .map((c) => Number(c.id))
+      )
+      if (noIconField.size) backfillCategoryIcons(d, noIconField)
     })
   } finally {
     d.execSync('PRAGMA foreign_keys = ON')
