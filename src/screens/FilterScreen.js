@@ -1,158 +1,187 @@
-// Full-screen transactions filter ("Filtrer l'historique").
-// Works on a local DRAFT initialized from the shared FiltersContext:
-// nothing is applied until the bottom CTA is pressed. Offers quick ranges,
-// previous-month cards, a home-made inline range calendar (pure JS Date),
-// MULTI-select chips for accounts / categories (with an include/exclude
-// toggle per section and an "uncategorized" chip) and type chips.
-import { useMemo, useState } from 'react'
+// Filters (v2). Edits the shared FiltersContext live; "Rechercher" only goes back.
+// Sections: period, months (current first), specific period (range calendar),
+// accounts and categories (tri-state chips), type. Period, month and range clear
+// each other (the context setters do it).
+import { useMemo, useState, useCallback } from 'react'
 import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import Ionicons from '@expo/vector-icons/Ionicons'
 import { useTheme, fonts, radius } from '../theme/tokens'
-import { Button, Dot, Segmented } from '../components/ui'
-import { useFilters, emptyFilters } from '../context/FiltersContext'
+import { Chip, TriChip, LogoTile, CategoryIcon } from '../components/v2'
+import { useFilters } from '../context/FiltersContext'
 import { listAccounts, listCategories } from '../db/database'
-import { monthName, weekdayInitials } from '../utils/format'
+import { monthName, weekdayInitials, today } from '../utils/format'
+import { recentMonths, monthKey } from '../utils/dates'
+import { PERIODS, triState } from '../utils/filters'
 import { useT } from '../i18n'
 
-/* ----------------------------- Date helpers ----------------------------- */
+const PERIOD_KEYS = { today: 'filter.today', '7d': 'filter.last7', '30d': 'filter.last30' }
+const TYPES = [
+  { value: null, key: 'filter.typeAll' },
+  { value: 'DEBIT', key: 'filter.typeDebit' },
+  { value: 'CREDIT', key: 'filter.typeCredit' },
+  { value: 'TRANSFER', key: 'filter.typeTransfer' },
+]
 
 const pad = (n) => String(n).padStart(2, '0')
-const toISO = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
-const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n)
 
-/* ------------------------------ Small chip ------------------------------ */
+/* ------------------------------- Pieces --------------------------------- */
 
-function Chip({ label, active, onPress, dotColor }) {
+function Section({ title, legend, children }) {
   const { colors } = useTheme()
+  return (
+    <View style={{ gap: 10 }}>
+      <View style={styles.sectionHead}>
+        <Text style={{ fontFamily: fonts.semibold, fontSize: 16, color: colors.ink }}>{title}</Text>
+        {legend ? <Legend /> : null}
+      </View>
+      {children}
+    </View>
+  )
+}
+
+// Mini chips reminding the two touches of a tri-state chip
+function Legend() {
+  const { colors } = useTheme()
+  const t = useT()
+  const mini = (bg, fg, icon, label) => (
+    <View style={[styles.mini, { backgroundColor: bg }]}>
+      <Ionicons name={icon} size={13} color={fg} />
+      <Text style={{ fontFamily: fonts.semibold, fontSize: 11, color: fg }}>{label}</Text>
+    </View>
+  )
+  return (
+    <View style={{ flexDirection: 'row', gap: 6 }}>
+      {mini(colors.primarySoft, colors.ink, 'checkmark', t('filter.legendInclude'))}
+      {mini(colors.dangerSoft, colors.danger, 'remove-circle', t('filter.legendExclude'))}
+    </View>
+  )
+}
+
+function MonthCard({ ym, active, onPress }) {
+  const { colors } = useTheme()
+  const [y, m] = ym.split('-').map(Number)
+  const fg = active ? colors.primaryInk : colors.ink
   return (
     <Pressable
       onPress={onPress}
-      style={[
-        styles.chip,
-        {
-          backgroundColor: active ? colors.primary : colors.surface,
-          borderColor: active ? colors.primary : colors.line,
-        },
-      ]}
+      accessibilityRole="button"
+      accessibilityState={{ selected: active }}
+      style={[styles.mcard, { backgroundColor: active ? colors.primary : colors.surface }]}
     >
-      {dotColor ? <Dot color={dotColor} size={9} /> : null}
-      <Text
-        numberOfLines={1}
-        style={{
-          fontFamily: active ? fonts.semibold : fonts.medium,
-          fontSize: 13,
-          color: active ? colors.primaryInk : colors.content,
-        }}
-      >
-        {label}
-      </Text>
+      <Text style={{ fontFamily: fonts.semibold, fontSize: 14, color: fg }}>{monthName(m - 1)}</Text>
+      <Text style={{ fontFamily: fonts.regular, fontSize: 12, color: active ? colors.primaryInk : colors.muted }}>{y}</Text>
     </Pressable>
   )
 }
 
-function SectionLabel({ children }) {
-  const { colors } = useTheme()
-  return (
-    <Text style={{ fontFamily: fonts.bold, fontSize: 16, color: colors.ink }}>{children}</Text>
-  )
-}
-
 /* --------------------------- Range calendar ----------------------------- */
-// Home-made monthly calendar with range selection (no external package).
-// First tap = range start; second tap = range end; a tap before the start
-// restarts the range from that day.
+// Pure-JS monthly grid; cells have integer widths measured with onLayout.
+// First tap = one-day range (anchor); second tap = the other end (sorted);
+// a tap with no anchor restarts. The range is therefore always complete.
 
-function RangeCalendar({ dateFrom, dateTo, onPickDay }) {
+function RangeCalendar({ range, month, onChange }) {
   const { colors } = useTheme()
+  const t = useT()
+  const [width, setWidth] = useState(0)
+  const [anchor, setAnchor] = useState(null)
   const [cursor, setCursor] = useState(() => {
-    const base = dateFrom ? new Date(`${dateFrom}T00:00:00`) : new Date()
-    return new Date(base.getFullYear(), base.getMonth(), 1)
+    const base = range?.from || (month ? `${month}-01` : today())
+    return { y: Number(base.slice(0, 4)), m: Number(base.slice(5, 7)) - 1 }
   })
 
-  const weeks = useMemo(() => {
-    const year = cursor.getFullYear()
-    const month = cursor.getMonth()
-    const daysInMonth = new Date(year, month + 1, 0).getDate()
-    // Monday-first offset: getDay() is 0=Sunday
-    const offset = (new Date(year, month, 1).getDay() + 6) % 7
-    const cells = Array(offset).fill(null)
-    for (let day = 1; day <= daysInMonth; day++) {
-      cells.push(`${year}-${pad(month + 1)}-${pad(day)}`)
-    }
-    while (cells.length % 7 !== 0) cells.push(null)
-    const rows = []
-    for (let i = 0; i < cells.length; i += 7) rows.push(cells.slice(i, i + 7))
-    return rows
+  const cell = Math.floor(width / 7)
+  const half = Math.floor(cell / 2)
+  const todayIso = today()
+
+  const cells = useMemo(() => {
+    const dim = new Date(cursor.y, cursor.m + 1, 0).getDate()
+    const offset = (new Date(cursor.y, cursor.m, 1).getDay() + 6) % 7 // Monday first
+    const out = Array(offset).fill(null)
+    for (let d = 1; d <= dim; d++) out.push(`${cursor.y}-${pad(cursor.m + 1)}-${pad(d)}`)
+    while (out.length % 7 !== 0) out.push(null)
+    return out
   }, [cursor])
 
-  const rangeEnd = dateTo || dateFrom
-  const inRange = (iso) => !!dateFrom && iso >= dateFrom && iso <= rangeEnd
-  const isEdge = (iso) => iso === dateFrom || iso === rangeEnd
+  const shift = (n) => setCursor((c) => {
+    const d = new Date(c.y, c.m + n, 1)
+    return { y: d.getFullYear(), m: d.getMonth() }
+  })
+
+  const pick = (iso) => {
+    if (anchor) {
+      const [from, to] = iso < anchor ? [iso, anchor] : [anchor, iso]
+      onChange({ from, to })
+      setAnchor(null)
+    } else {
+      onChange({ from: iso, to: iso })
+      setAnchor(iso)
+    }
+  }
+
+  const from = range?.from || null
+  const to = range?.to || from
+  const wd = weekdayInitials()
 
   return (
-    <View style={[styles.calendar, { backgroundColor: colors.surface, borderColor: colors.line }]}>
-      {/* Month navigation */}
-      <View style={styles.calHeader}>
-        <Pressable
-          hitSlop={8}
-          onPress={() => setCursor((c) => new Date(c.getFullYear(), c.getMonth() - 1, 1))}
-          style={[styles.calNav, { backgroundColor: colors.surface2 }]}
-        >
-          <Ionicons name="chevron-back" size={17} color={colors.ink} />
-        </Pressable>
+    <View style={[styles.cal, { backgroundColor: colors.surface }]}>
+      <View style={styles.calHead}>
         <Text style={{ fontFamily: fonts.semibold, fontSize: 15, color: colors.ink }}>
-          {monthName(cursor.getMonth())} {cursor.getFullYear()}
+          {monthName(cursor.m)} {cursor.y}
         </Text>
-        <Pressable
-          hitSlop={8}
-          onPress={() => setCursor((c) => new Date(c.getFullYear(), c.getMonth() + 1, 1))}
-          style={[styles.calNav, { backgroundColor: colors.surface2 }]}
-        >
-          <Ionicons name="chevron-forward" size={17} color={colors.ink} />
-        </Pressable>
-      </View>
-
-      {/* Weekday headers, Monday first */}
-      <View style={styles.calRow}>
-        {weekdayInitials().map((w, i) => (
-          <View key={i} style={styles.calCell}>
-            <Text style={{ fontFamily: fonts.medium, fontSize: 12, color: colors.muted }}>{w}</Text>
-          </View>
-        ))}
-      </View>
-
-      {/* Day grid */}
-      {weeks.map((week, wi) => (
-        <View key={wi} style={styles.calRow}>
-          {week.map((iso, ci) => {
-            if (!iso) return <View key={ci} style={styles.calCell} />
-            const selected = inRange(iso)
-            const edge = isEdge(iso)
-            return (
-              <Pressable key={ci} onPress={() => onPickDay(iso)} style={styles.calCell}>
-                <View
-                  style={[
-                    styles.calDay,
-                    selected && { backgroundColor: colors.primary },
-                    edge && { borderWidth: 2, borderColor: colors.primary600 },
-                  ]}
-                >
-                  <Text
-                    style={{
-                      fontFamily: edge ? fonts.bold : selected ? fonts.semibold : fonts.regular,
-                      fontSize: 13,
-                      color: selected ? colors.primaryInk : colors.content,
-                    }}
-                  >
-                    {Number(iso.slice(8, 10))}
-                  </Text>
-                </View>
-              </Pressable>
-            )
-          })}
+        <View style={{ flexDirection: 'row' }}>
+          <Pressable onPress={() => shift(-1)} accessibilityLabel={t('filter.prevMonth')} style={styles.nav}>
+            <Ionicons name="chevron-back" size={22} color={colors.ink} />
+          </Pressable>
+          <Pressable onPress={() => shift(1)} accessibilityLabel={t('filter.nextMonth')} style={styles.nav}>
+            <Ionicons name="chevron-forward" size={22} color={colors.ink} />
+          </Pressable>
         </View>
-      ))}
+      </View>
+      <View onLayout={(e) => setWidth(Math.floor(e.nativeEvent.layout.width))} style={{ alignItems: 'center' }}>
+        {cell > 0 ? (
+          <View style={{ width: cell * 7, flexDirection: 'row', flexWrap: 'wrap' }}>
+            {wd.map((w, i) => (
+              <View key={`w${i}`} style={{ width: cell, height: 28, alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ fontFamily: fonts.medium, fontSize: 12, color: colors.muted }}>{w}</Text>
+              </View>
+            ))}
+            {cells.map((iso, i) => {
+              if (!iso) return <View key={`e${i}`} style={{ width: cell, height: 42 }} />
+              const inside = !!from && iso >= from && iso <= to
+              const edge = inside && (iso === from || iso === to)
+              const multi = from !== to
+              return (
+                <Pressable key={iso} onPress={() => pick(iso)} style={{ width: cell, height: 42, alignItems: 'center', justifyContent: 'center' }}>
+                  {inside && multi ? (
+                    <View
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        bottom: 0,
+                        left: iso === from ? half : 0,
+                        right: iso === to ? cell - half : 0,
+                        backgroundColor: colors.primarySoft,
+                      }}
+                    />
+                  ) : null}
+                  <View
+                    style={[
+                      styles.day,
+                      edge && { backgroundColor: colors.primary },
+                      !edge && iso === todayIso && { borderWidth: 1.5, borderColor: colors.faint },
+                    ]}
+                  >
+                    <Text style={{ fontFamily: edge ? fonts.semibold : fonts.regular, fontSize: 14, color: edge ? colors.primaryInk : colors.ink }}>
+                      {Number(iso.slice(8, 10))}
+                    </Text>
+                  </View>
+                </Pressable>
+              )
+            })}
+          </View>
+        ) : null}
+      </View>
     </View>
   )
 }
@@ -163,338 +192,128 @@ export default function FilterScreen({ navigation }) {
   const { colors } = useTheme()
   const t = useT()
   const insets = useSafeAreaInsets()
-  const { filters, setFilters } = useFilters()
-
-  // Local draft — applied only when the CTA is pressed
-  const [draft, setDraft] = useState({ ...emptyFilters, ...filters })
-  const patch = (p) => setDraft((d) => ({ ...d, ...p }))
+  const { filters, setPeriod, setMonth, setRange, setType, cycleAccount, cycleCategory, resetFilters } = useFilters()
 
   const accounts = useMemo(() => listAccounts(), [])
   const categories = useMemo(() => listCategories(), [])
+  const months = useMemo(() => recentMonths(12), [])
 
-  /* Quick ranges ("À partir") */
-  const quickRanges = useMemo(() => {
-    const today = new Date()
-    const iso = toISO(today)
-    return [
-      { key: 'today', label: t('filter.today'), from: iso, to: iso },
-      { key: '7d', label: t('filter.last7'), from: toISO(addDays(today, -6)), to: iso },
-      { key: '30d', label: t('filter.last30'), from: toISO(addDays(today, -29)), to: iso },
-    ]
-  }, [t])
-
-  /* Previous months ("D'un mois précédent") */
-  const monthCards = useMemo(() => {
-    const now = new Date()
-    const cards = []
-    for (let i = 1; i <= 4; i++) {
-      const first = new Date(now.getFullYear(), now.getMonth() - i, 1)
-      const last = new Date(now.getFullYear(), now.getMonth() - i + 1, 0)
-      cards.push({
-        key: toISO(first),
-        month: monthName(first.getMonth()),
-        year: first.getFullYear(),
-        from: toISO(first),
-        to: toISO(last),
-      })
-    }
-    return cards
-  }, [t])
-
-  const isPeriod = (from, to) => draft.date_from === from && draft.date_to === to
-  const setPeriod = (from, to) =>
-    patch(isPeriod(from, to) ? { date_from: null, date_to: null } : { date_from: from, date_to: to })
-
-  /* Calendar range logic */
-  const onPickDay = (iso) => {
-    if (!draft.date_from || draft.date_to) {
-      // No range started, or a complete range exists: start a new one
-      patch({ date_from: iso, date_to: null })
-    } else if (iso < draft.date_from) {
-      // Earlier than the start: restart from this day
-      patch({ date_from: iso, date_to: null })
-    } else {
-      patch({ date_to: iso })
-    }
-  }
-
-  const toggle = (field, value) => patch({ [field]: draft[field] === value ? null : value })
-
-  // Multi-select: toggle one id inside an array field (immutable update)
-  const toggleId = (field, value) =>
-    patch({
-      [field]: draft[field].includes(value)
-        ? draft[field].filter((v) => v !== value)
-        : [...draft[field], value],
-    })
-
-  const apply = () => {
-    // Single day picked in the calendar (no end tapped): filter that day
-    // only — not "from that day until today"
-    const date_to = draft.date_from && !draft.date_to ? draft.date_from : draft.date_to
-    setFilters({ ...draft, date_to })
-    navigation.goBack()
-  }
-
-  const includeExclude = [
-    { label: t('filter.include'), value: 'include' },
-    { label: t('filter.exclude'), value: 'exclude' },
-  ]
+  const toggleType = useCallback((v) => setType(filters.type === v ? null : v), [filters.type, setType])
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
-      <ScrollView
-        contentContainerStyle={{ padding: 20, paddingBottom: 24, gap: 26 }}
-        showsVerticalScrollIndicator={false}
-      >
-        <Text style={{ fontFamily: fonts.extrabold, fontSize: 28, color: colors.ink, lineHeight: 36 }}>
-          {t('filter.title')}
-        </Text>
+      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 24, gap: 20 }} showsVerticalScrollIndicator={false}>
+        <Section title={t('filter.period')}>
+          <View style={styles.wrap}>
+            {PERIODS.map((p) => (
+              <Chip key={p} label={t(PERIOD_KEYS[p])} selected={filters.period === p} onPress={() => setPeriod(filters.period === p ? null : p)} />
+            ))}
+          </View>
+        </Section>
 
-        {/* Quick ranges */}
-        <View style={{ gap: 12 }}>
-          <SectionLabel>{t('filter.from')}</SectionLabel>
-          <View style={styles.chipRow}>
-            {quickRanges.map((r) => (
-              <Chip
-                key={r.key}
-                label={r.label}
-                active={isPeriod(r.from, r.to)}
-                onPress={() => setPeriod(r.from, r.to)}
+        <Section title={t('filter.months')}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.bleed} contentContainerStyle={{ gap: 8, paddingHorizontal: 16 }}>
+            {months.map((ym) => (
+              <MonthCard key={ym} ym={ym} active={filters.month === ym} onPress={() => setMonth(filters.month === ym ? null : ym)} />
+            ))}
+          </ScrollView>
+        </Section>
+
+        <Section title={t('filter.exactPeriod')}>
+          <RangeCalendar range={filters.range} month={filters.month || (filters.period ? monthKey() : null)} onChange={setRange} />
+        </Section>
+
+        <Section title={t('filter.accounts')} legend>
+          <View style={styles.wrap}>
+            {accounts.map((a) => (
+              <TriChip
+                key={a.id}
+                label={a.name}
+                state={triState(filters.accounts, a.id)}
+                onPress={() => cycleAccount(a.id)}
+                leading={
+                  <LogoTile
+                    operatorId={a.operator_id}
+                    name={a.name}
+                    color={a.color}
+                    icon={a.type === 'PHYSICAL' ? 'cash-outline' : undefined}
+                    size={20}
+                  />
+                }
               />
             ))}
           </View>
-        </View>
+        </Section>
 
-        {/* Previous months */}
-        <View style={{ gap: 12 }}>
-          <SectionLabel>{t('filter.previousMonth')}</SectionLabel>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10 }}>
-            {monthCards.map((m) => {
-              const active = isPeriod(m.from, m.to)
+        <Section title={t('filter.type')}>
+          <View style={[styles.seg, { borderColor: colors.line }]}>
+            {TYPES.map((o, i) => {
+              const on = filters.type === o.value
               return (
                 <Pressable
-                  key={m.key}
-                  onPress={() => setPeriod(m.from, m.to)}
+                  key={o.key}
+                  onPress={() => (o.value === null ? setType(null) : toggleType(o.value))}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: on }}
                   style={[
-                    styles.monthCard,
-                    {
-                      backgroundColor: active ? colors.primary : colors.surface,
-                      borderColor: active ? colors.primary600 : colors.line,
-                    },
+                    styles.segItem,
+                    i > 0 && { borderLeftWidth: 1, borderLeftColor: colors.line },
+                    on && { backgroundColor: colors.primarySoft },
                   ]}
                 >
-                  <Ionicons
-                    name={active ? 'calendar' : 'calendar-outline'}
-                    size={20}
-                    color={active ? colors.primaryInk : colors.muted}
-                  />
-                  <Text
-                    style={{
-                      fontFamily: active ? fonts.bold : fonts.semibold,
-                      fontSize: 14,
-                      color: active ? colors.primaryInk : colors.ink,
-                    }}
-                  >
-                    {m.month}
-                  </Text>
-                  <Text
-                    style={{
-                      fontFamily: fonts.regular,
-                      fontSize: 12,
-                      color: active ? colors.primaryInk : colors.muted,
-                    }}
-                  >
-                    {m.year}
+                  <Text numberOfLines={1} style={{ fontFamily: on ? fonts.semibold : fonts.medium, fontSize: 13, color: on ? colors.ink : colors.content }}>
+                    {t(o.key)}
                   </Text>
                 </Pressable>
               )
             })}
-          </ScrollView>
-        </View>
-
-        {/* Inline range calendar */}
-        <View style={{ gap: 12 }}>
-          <SectionLabel>{t('filter.exactPeriod')}</SectionLabel>
-          <RangeCalendar dateFrom={draft.date_from} dateTo={draft.date_to} onPickDay={onPickDay} />
-        </View>
-
-        {/* Accounts (multi-select + include/exclude) */}
-        <View style={{ gap: 12 }}>
-          <View style={styles.sectionHeader}>
-            <SectionLabel>{t('filter.account')}</SectionLabel>
-            <View style={{ width: 172 }}>
-              <Segmented
-                segments={includeExclude}
-                value={draft.accounts_exclude ? 'exclude' : 'include'}
-                onChange={(v) => patch({ accounts_exclude: v === 'exclude' })}
-              />
-            </View>
           </View>
-          {draft.accounts_exclude ? (
-            <Text style={{ fontFamily: fonts.regular, fontSize: 12, color: colors.muted }}>
-              {t('filter.excludeHint')}
-            </Text>
-          ) : null}
-          <View style={styles.chipRow}>
-            {accounts.map((a) => (
-              <Chip
-                key={a.id}
-                label={a.name}
-                dotColor={a.color}
-                active={draft.account_ids.includes(a.id)}
-                onPress={() => toggleId('account_ids', a.id)}
-              />
-            ))}
-            {accounts.length === 0 ? (
-              <Text style={{ fontFamily: fonts.regular, fontSize: 13, color: colors.muted }}>
-                {t('filter.noAccount')}
-              </Text>
-            ) : null}
-          </View>
-        </View>
+        </Section>
 
-        {/* Type */}
-        <View style={{ gap: 12 }}>
-          <SectionLabel>{t('filter.type')}</SectionLabel>
-          <View style={styles.chipRow}>
-            <Chip label={t('filter.debit')} active={draft.type === 'DEBIT'} onPress={() => toggle('type', 'DEBIT')} />
-            <Chip label={t('filter.credit')} active={draft.type === 'CREDIT'} onPress={() => toggle('type', 'CREDIT')} />
-          </View>
-        </View>
-
-        {/* Categories (multi-select + include/exclude + uncategorized) */}
-        <View style={{ gap: 12 }}>
-          <View style={styles.sectionHeader}>
-            <SectionLabel>{t('filter.category')}</SectionLabel>
-            <View style={{ width: 172 }}>
-              <Segmented
-                segments={includeExclude}
-                value={draft.categories_exclude ? 'exclude' : 'include'}
-                onChange={(v) => patch({ categories_exclude: v === 'exclude' })}
-              />
-            </View>
-          </View>
-          {draft.categories_exclude ? (
-            <Text style={{ fontFamily: fonts.regular, fontSize: 12, color: colors.muted }}>
-              {t('filter.excludeHint')}
-            </Text>
-          ) : null}
-          <View style={styles.chipRow}>
+        <Section title={t('filter.categories')} legend>
+          <View style={styles.wrap}>
+            <TriChip label={t('filter.noCategory')} state={triState(filters.categories, 'none')} onPress={() => cycleCategory('none')} />
             {categories.map((c) => (
-              <Chip
+              <TriChip
                 key={c.id}
                 label={c.name}
-                dotColor={c.color}
-                active={draft.category_ids.includes(c.id)}
-                onPress={() => toggleId('category_ids', c.id)}
+                state={triState(filters.categories, c.id)}
+                onPress={() => cycleCategory(c.id)}
+                leading={<CategoryIcon icon={c.icon} name={c.name} color={c.color} size={20} />}
               />
             ))}
-            <Chip
-              label={t('filter.noCategory')}
-              dotColor="#6B7280"
-              active={draft.category_ids.includes('none')}
-              onPress={() => toggleId('category_ids', 'none')}
-            />
           </View>
-        </View>
+        </Section>
       </ScrollView>
 
-      {/* Sticky bottom CTA */}
-      <View
-        style={[
-          styles.footer,
-          {
-            backgroundColor: colors.bg,
-            borderTopColor: colors.line,
-            paddingBottom: Math.max(insets.bottom, 14),
-          },
-        ]}
-      >
-        <Pressable onPress={() => setDraft({ ...emptyFilters })} hitSlop={6} style={{ alignSelf: 'center' }}>
-          <Text style={{ fontFamily: fonts.semibold, fontSize: 14, color: colors.muted }}>
-            {t('common.reset')}
-          </Text>
+      <View style={[styles.foot, { backgroundColor: colors.surface, borderTopColor: colors.line, paddingBottom: Math.max(insets.bottom, 14) }]}>
+        <Pressable onPress={resetFilters} accessibilityRole="button" style={[styles.btn, { flex: 1 }]}>
+          <Text style={{ fontFamily: fonts.semibold, fontSize: 14, color: colors.ink }}>{t('common.reset')}</Text>
         </Pressable>
-        <Button
-          title={t('filter.apply')}
-          onPress={apply}
-          style={{ borderRadius: 24, minHeight: 54 }}
-        />
+        <Pressable
+          onPress={() => navigation.goBack()}
+          accessibilityRole="button"
+          style={({ pressed }) => [styles.btn, { flex: 1.5, backgroundColor: pressed ? colors.primary600 : colors.primary }]}
+        >
+          <Text style={{ fontFamily: fonts.semibold, fontSize: 14, color: colors.primaryInk }}>{t('filter.apply')}</Text>
+        </Pressable>
       </View>
     </View>
   )
 }
 
 const styles = StyleSheet.create({
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 10,
-  },
-  chipRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 9,
-  },
-  chip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-    borderRadius: 999,
-    borderWidth: 1,
-    paddingHorizontal: 14,
-    minHeight: 38,
-  },
-  monthCard: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 4,
-    width: 104,
-    paddingVertical: 14,
-    borderRadius: radius.xl,
-    borderWidth: 1.5,
-  },
-  calendar: {
-    borderRadius: radius.xl,
-    borderWidth: 1,
-    padding: 12,
-    gap: 4,
-  },
-  calHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  calNav: {
-    width: 32,
-    height: 32,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  calRow: {
-    flexDirection: 'row',
-  },
-  calCell: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 2,
-  },
-  calDay: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  footer: {
-    borderTopWidth: 1,
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    gap: 12,
-  },
+  sectionHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 28 },
+  wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  bleed: { marginHorizontal: -16, flexGrow: 0 },
+  mini: { height: 22, flexDirection: 'row', alignItems: 'center', gap: 3, paddingLeft: 6, paddingRight: 8, borderRadius: 6 },
+  mcard: { minWidth: 104, paddingVertical: 10, paddingHorizontal: 14, borderRadius: radius.xl, gap: 2 },
+  cal: { paddingHorizontal: 10, paddingTop: 10, paddingBottom: 12, borderRadius: 20 },
+  calHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', height: 40, paddingLeft: 8, paddingRight: 4 },
+  nav: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  day: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
+  seg: { height: 40, borderRadius: 20, borderWidth: 1, flexDirection: 'row', overflow: 'hidden' },
+  segItem: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  foot: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingTop: 12, borderTopWidth: 1 },
+  btn: { height: 52, borderRadius: radius.xxl, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12 },
 })
