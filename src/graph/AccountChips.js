@@ -67,7 +67,9 @@ export const AccountChips = memo(function AccountChips({ accounts, selected, onC
 })
 
 const styles = StyleSheet.create({
-  scroll: { flexGrow: 0 },
+  // a ScrollView defaults to flexGrow/flexShrink 1: without flexShrink 0 a
+  // taller sibling below squeezes the row and clips the chips' bottom border
+  scroll: { flexGrow: 0, flexShrink: 0 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16 },
   noLead: { width: 0, height: 0, marginLeft: -4 },
 })
