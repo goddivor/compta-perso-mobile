@@ -2,18 +2,20 @@
 // Only the unit owning this area edits this file (and its twin en/categories.js).
 export default {
   /* ------------------------------ Catégories ----------------------------- */
-  'categories.empty': 'Aucune catégorie. Appuie sur + pour en créer une.',
-  'categories.deleteTitle': 'Supprimer « {name} »',
-  'categories.deleteMsg': 'Les transactions liées perdront leur catégorie. Continuer ?',
-  'categories.editHint': 'Appuie sur une catégorie pour la modifier.',
+  'categories.empty': 'Aucune catégorie',
+  'categories.edit': 'Modifier',
+  'categories.deleteTitle': 'Supprimer la catégorie ?',
+  'categories.deleteMsg': '« {name} » sera supprimée. Les transactions liées perdront leur catégorie.',
 
   /* ------------------------- Formulaire catégorie ------------------------ */
   'categoryForm.title': 'Nouvelle catégorie',
   'categoryForm.editTitle': 'Modifier la catégorie',
   'categoryForm.name': 'Nom',
   'categoryForm.namePlaceholder': 'ex : Internet',
-  'categoryForm.flow': 'Flux',
-  'categoryForm.both': 'Les deux',
+  'categoryForm.flow': 'Sens du flux',
+  'categoryForm.both': 'Débit et crédit',
   'categoryForm.color': 'Couleur',
+  'categoryForm.icon': 'Icône',
+  'categoryForm.noIcon': 'Aucune icône',
   'categoryForm.delete': 'Supprimer la catégorie',
 }
