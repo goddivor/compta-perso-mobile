@@ -2,8 +2,9 @@
 // profile country's registry (grouped by type, suggestions, cash, free
 // account); then the form: name, balance and the account's fee rules. No
 // colour picker (first free palette colour), no type picker (the operator or
-// cash decides it). Edit with no operator can link one from here.
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react'
+// cash decides it). Once the account exists its kind is fixed; an electronic
+// account can still link, change or drop its operator.
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { View, Text, TextInput, ScrollView, Pressable, BackHandler, StyleSheet } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import Ionicons from '@expo/vector-icons/Ionicons'
@@ -21,7 +22,9 @@ import { Field, Input, Button } from '../components/ui'
 import { nextAccountColor } from '../data/accountColors'
 import { SuffixInput } from '../data/SuffixInput'
 import { operatorTypeLabel, operatorGroupLabel, ruleSummary, RULE_ICON } from '../data/accountLabels'
+import { kindControls, saveBeforeRule, isActiveOperator, suggestionsTitle } from '../data/accountForm'
 import { feeRuleLabel } from '../utils/fees'
+import { CURRENCY_LABEL } from '../utils/format'
 
 const TYPE_ORDER = ['mobile_money', 'bank', 'microfinance', 'fintech']
 const GROUP_LIMIT = 4
@@ -95,7 +98,7 @@ function PlainRow({ icon, color, label, onPress }) {
   )
 }
 
-function OperatorSearch({ countryIso2, linkMode, onPickOperator, onPickCash, onPickFree }) {
+function OperatorSearch({ countryIso2, linkMode, canUnlink, onPickOperator, onPickCash, onPickFree, onUnlink }) {
   const { colors } = useTheme()
   const { t, lang } = useI18n()
   const { data: country } = useCountry(countryIso2)
@@ -107,7 +110,7 @@ function OperatorSearch({ countryIso2, linkMode, onPickOperator, onPickCash, onP
 
   const groups = useMemo(() => {
     if (!operators || !q) return []
-    const hits = searchOperators(operators, q, { limit: 1000 })
+    const hits = searchOperators(operators.filter(isActiveOperator), q, { limit: 1000 })
     return TYPE_ORDER
       .map((type) => ({ type, items: hits.filter((o) => o.type === type) }))
       .filter((g) => g.items.length)
@@ -117,7 +120,7 @@ function OperatorSearch({ countryIso2, linkMode, onPickOperator, onPickCash, onP
     if (!operators) return []
     const rank = (o) => TYPE_ORDER.indexOf(o.type) * 2 + (o.logo?.svg ? 0 : 1)
     return operators
-      .filter((o) => (o.status || 'active') === 'active')
+      .filter(isActiveOperator)
       .sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name))
       .slice(0, SUGGESTION_COUNT)
   }, [operators])
@@ -152,7 +155,7 @@ function OperatorSearch({ countryIso2, linkMode, onPickOperator, onPickCash, onP
               </View>
             ) : suggestions.length ? (
               <>
-                <GroupTitle>{t('accountForm.suggestions', { country: country ? (country.name[lang] || country.name.en) : '' })}</GroupTitle>
+                <GroupTitle>{suggestionsTitle(t, lang, country)}</GroupTitle>
                 {suggestions.map((op) => <OperatorRow key={op.id} op={op} qw={qw} onPress={onPickOperator} />)}
               </>
             ) : null}
@@ -162,6 +165,10 @@ function OperatorSearch({ countryIso2, linkMode, onPickOperator, onPickCash, onP
                 <PlainRow icon="cash-outline" color={colors.muted} label={t('common.cash')} onPress={onPickCash} />
                 <PlainRow icon="create-outline" color={colors.link} label={t('accountForm.otherAccount')} onPress={() => onPickFree('')} />
               </>
+            ) : canUnlink ? (
+              <View style={{ marginTop: 12 }}>
+                <PlainRow icon="close" color={colors.muted} label={t('accountForm.noOperator')} onPress={onUnlink} />
+              </View>
             ) : null}
           </>
         ) : (
@@ -222,9 +229,8 @@ export default function AccountFormScreen({ navigation, route }) {
   const [rules, setRules] = useState([])
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [txCount, setTxCount] = useState(0)
-
-  const { data: operator } = useOperator(operatorId)
-  const { data: country } = useCountry(operator ? operatorCountry(operator.id) : null)
+  const createdId = useRef(null) // set synchronously by createAccount: a second tap cannot create twice
+  const leaving = useRef(false) // "Enregistrer" already ran
 
   useLayoutEffect(() => {
     navigation.setOptions({ title: editId ? t('accountForm.editTitle') : t('accountForm.newTitle') })
@@ -250,14 +256,21 @@ export default function AccountFormScreen({ navigation, route }) {
     return () => sub.remove()
   }, [step, picked])
 
-  const linkMode = !!editId // searching to link an operator to an existing account
+  // The account exists: its type is fixed (updateAccount does not store it)
+  const { canChange, linkMode, canUnlink } = kindControls({ savedId, type, operatorId })
+
+  const { data: operator } = useOperator(operatorId)
+  const { data: country } = useCountry(operator ? operatorCountry(operator.id) : null)
 
   const pickOperator = useCallback((op) => {
+    // In link mode the name follows the operator only while it is still the operator's name
+    if (!linkMode || (operator && name === operator.name)) setName(op.name)
+    if (!linkMode) setType('ELECTRONIC')
     setOperatorId(op.id)
-    if (!linkMode) { setType('ELECTRONIC'); setName(op.name) }
     setPicked(true)
     setStep('form')
-  }, [linkMode])
+  }, [linkMode, operator, name])
+  const unlink = useCallback(() => { setOperatorId(null); setStep('form') }, [])
   const pickCash = useCallback(() => {
     setOperatorId(null); setType('PHYSICAL'); setName(t('common.cash')); setPicked(true); setStep('form')
   }, [t])
@@ -272,30 +285,35 @@ export default function AccountFormScreen({ navigation, route }) {
 
   // Creates the account (new mode) or updates it; returns its id
   const persist = () => {
-    if (savedId) {
-      updateAccount({ id: savedId, name: name.trim(), provider, initial_balance: balanceNum, operator_id: operatorId })
-      return savedId
+    const id = savedId ?? createdId.current
+    if (id) {
+      updateAccount({ id, name: name.trim(), provider, initial_balance: balanceNum, operator_id: operatorId })
+      return id
     }
-    const id = createAccount({
+    const newId = createAccount({
       name: name.trim(), type, provider, initial_balance: balanceNum, operator_id: operatorId,
       color: nextAccountColor(listAccounts()),
     })
-    setSavedId(id)
-    return id
+    createdId.current = newId
+    setSavedId(newId)
+    return newId
   }
 
   const save = () => {
-    if (!valid) return
-    persist()
+    if (!valid || leaving.current) return
+    leaving.current = true
+    try { persist() } catch (e) { leaving.current = false; throw e }
     refresh()
     navigation.goBack()
   }
 
-  // A rule needs an existing account: a new one is created first and keeps being edited
+  // A rule needs an existing account: an unsaved one is created first and keeps
+  // being edited; an existing one is not written before "Enregistrer"
   const addRule = () => {
-    if (!valid) return
-    const id = persist()
-    refresh()
+    if (!valid || leaving.current) return
+    const existing = savedId ?? createdId.current
+    let id = existing
+    if (saveBeforeRule(existing)) { id = persist(); refresh() }
     navigation.navigate('FeeRuleForm', { accountId: id })
   }
 
@@ -319,9 +337,11 @@ export default function AccountFormScreen({ navigation, route }) {
         <OperatorSearch
           countryIso2={profile.country_iso2}
           linkMode={linkMode}
+          canUnlink={canUnlink}
           onPickOperator={pickOperator}
           onPickCash={pickCash}
           onPickFree={pickFree}
+          onUnlink={unlink}
         />
       </SafeAreaView>
     )
@@ -330,7 +350,6 @@ export default function AccountFormScreen({ navigation, route }) {
   const kind = operator
     ? `${operatorTypeLabel(t, operator.type)}${country ? ` · ${country.name[lang] || country.name.en}` : ''}`
     : type === 'PHYSICAL' ? t('common.cash') : t('accountForm.noOperator')
-  const canChange = !editId || (type === 'ELECTRONIC' && !operatorId)
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={['bottom']}>
@@ -366,7 +385,7 @@ export default function AccountFormScreen({ navigation, route }) {
             value={balance}
             onChangeText={(v) => setBalance(v.replace(',', '.'))}
             placeholder="0"
-            suffix="FCFA"
+            suffix={CURRENCY_LABEL}
           />
         </Field>
 
