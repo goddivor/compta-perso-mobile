@@ -1,8 +1,9 @@
 // Stats tab (v2): account chips with logos and a segmented period on top,
 // then three panels. Balance = one ink line (a balance is not a debit),
-// scoped by the chips; expenses by category = a horizontal ranking (red
-// bars, the category icon carries the identity; a tap filters Transactions
-// on it); income vs expenses by month = grouped bars (green / red).
+// scoped by the chips; expenses by category = a horizontal ranking (bar
+// colour = the category's share of all expenses, see shareTone; the category
+// icon carries the identity; a tap filters Transactions on it); income vs
+// expenses by month = grouped bars (green / red).
 // Account chips only scope the balance: the ranking and the monthly bars
 // always cover every account. Empty panels are left out; with no account the
 // whole screen is one centred empty state.
@@ -37,6 +38,26 @@ function compact(n) {
   if (abs >= 1e6) return new Intl.NumberFormat(getFormatLocale(), { maximumFractionDigits: 1 }).format(n / 1e6) + 'M'
   if (abs >= 1e3) return Math.round(n / 1e3) + 'k'
   return String(Math.round(n))
+}
+
+// Floor of the balance axis: 0 while the plotted balance never goes negative
+// (a balance axis below zero reads as a debt that never happened); otherwise
+// the lowest value rounded down to the order of magnitude of the spread.
+export function axisBase(values) {
+  const min = Math.min(...values)
+  if (min >= 0) return 0
+  const max = Math.max(...values)
+  const span = max - min || Math.abs(min)
+  const unit = Math.pow(10, Math.floor(Math.log10(span)))
+  return Math.floor(min / unit) * unit
+}
+
+// Owner's rule for the category bars, on the share shown next to the name
+// (rounded %): under 50 % green, 50 % to 75 % yellow, above 75 % red.
+export function shareTone(pct) {
+  if (pct < 50) return 'success'
+  if (pct <= 75) return 'primary'
+  return 'danger'
 }
 
 function axisDate(iso) {
@@ -152,13 +173,7 @@ export default function StatsScreen({ navigation }) {
   const line = useMemo(() => {
     const n = series.length
     if (n < 2) return null
-    const values = series.map((p) => p.value)
-    const min = Math.min(...values)
-    const max = Math.max(...values)
-    const span = max - min || Math.abs(max) * 0.1 || 1000
-    // the axis starts under the lowest point (not at zero), so a dip stays visible
-    const unit = Math.pow(10, Math.floor(Math.log10(span)))
-    const base = Math.floor((min - span * 0.15) / unit) * unit
+    const base = axisBase(series.map((p) => p.value))
     const mid = Math.floor((n - 1) / 2)
     return {
       base,
@@ -229,7 +244,7 @@ export default function StatsScreen({ navigation }) {
           <AccountChips accounts={accounts} selected={selected} onChange={setSel} allLabel={t('stats.all')} />
           <View style={{ height: 12 }} />
           <PeriodSeg options={periods} value={period} onChange={setPeriod} />
-          <ScrollView contentContainerStyle={styles.stack}>
+          <ScrollView style={styles.body} contentContainerStyle={styles.stack}>
             {/* ----------------------------- Balance ---------------------------- */}
             <Panel>
               <PanelHead title={t('stats.balance')} sub={t('stats.scope', { account: scopeName, period: periodLabel })} />
@@ -262,7 +277,9 @@ export default function StatsScreen({ navigation }) {
                 <PanelHead title={t('stats.expensesByCategory')} />
                 <Amount value={totalExpenses} size={22} weight="bold" color={colors.danger} style={{ marginBottom: 12 }} />
                 <View style={{ gap: 4 }}>
-                  {expenses.map((e) => (
+                  {expenses.map((e) => {
+                    const pct = Math.round((e.total / totalExpenses) * 100)
+                    return (
                     <Pressable
                       key={e.category_id == null ? 'none' : e.category_id}
                       onPress={() => goToCategory(e.category_id)}
@@ -279,17 +296,18 @@ export default function StatsScreen({ navigation }) {
                           <Text style={{ flex: 1, fontFamily: fonts.medium, fontSize: 13, color: colors.ink }} numberOfLines={1}>
                             {e.category_id == null ? t('stats.noCategory') : e.name}
                             <Text style={{ fontFamily: fonts.regular, fontSize: 11, color: colors.muted }}>
-                              {'  ' + t('stats.percent', { n: Math.round((e.total / totalExpenses) * 100) })}
+                              {'  ' + t('stats.percent', { n: pct })}
                             </Text>
                           </Text>
                           <Amount value={e.total} size={13} color={colors.danger} />
                         </View>
                         <View style={[styles.track, { backgroundColor: colors.surface2 }]}>
-                          <View style={[styles.fill, { width: `${(e.total / maxExpense) * 100}%`, backgroundColor: colors.danger }]} />
+                          <View style={[styles.fill, { width: `${(e.total / maxExpense) * 100}%`, backgroundColor: colors[shareTone(pct)] }]} />
                         </View>
                       </View>
                     </Pressable>
-                  ))}
+                    )
+                  })}
                 </View>
               </Panel>
             ) : null}
@@ -332,6 +350,9 @@ export default function StatsScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   appbar: { paddingHorizontal: 16, paddingTop: 14, paddingBottom: 12 },
+  // flex 1 = basis 0: the panels scroll inside the space left, and never make
+  // Yoga shrink the chips row above (a ScrollView defaults to flexShrink 1)
+  body: { flex: 1 },
   stack: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 30, gap: 12 },
   panel: { borderRadius: radius.xxl, padding: 16 },
   head: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 8 },
