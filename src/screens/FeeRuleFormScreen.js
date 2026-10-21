@@ -10,7 +10,7 @@ import { useTheme, fonts, radius } from '../theme/tokens'
 import { listFeeRules, createFeeRule, updateFeeRule, deleteFeeRule } from '../db/database'
 import { useRefresh } from '../context/AppContext'
 import { useT } from '../i18n'
-import { fmtNumber } from '../utils/format'
+import { fmtNumber, CURRENCY_LABEL } from '../utils/format'
 import { feeRuleLabel } from '../utils/fees'
 import { Chip, ConfirmDialog } from '../components/v2'
 import { Field, Input, Segmented, Button } from '../components/ui'
@@ -119,13 +119,13 @@ export default function FeeRuleFormScreen({ navigation, route }) {
 
         {kind === 'percent' ? (
           <Field label={t('feeRule.rate')}>
-            <SuffixInput keyboardType="numeric" value={pct} onChangeText={(v) => setPct(v.replace(',', '.'))} suffix="%" placeholder="0" />
+            <SuffixInput keyboardType="numeric" value={pct} onChangeText={(v) => setPct(v.replace(',', '.'))} suffix={t('feeRule.percentUnit')} placeholder="0" />
           </Field>
         ) : null}
 
         {kind === 'fixed' ? (
           <Field label={t('feeRule.amount')}>
-            <SuffixInput keyboardType="numeric" value={fixed} onChangeText={setFixed} suffix="FCFA" placeholder="0" />
+            <SuffixInput keyboardType="numeric" value={fixed} onChangeText={setFixed} suffix={CURRENCY_LABEL} placeholder="0" />
           </Field>
         ) : null}
 
