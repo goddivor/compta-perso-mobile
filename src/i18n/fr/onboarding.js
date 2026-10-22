@@ -19,5 +19,6 @@ export default {
   'onboarding.lockNote': 'Définitive après ta première opération',
   'onboarding.accountsNote': 'Celle de tes {n} comptes',
   'onboarding.accountsNoteOne': 'Celle de ton compte',
+  'onboarding.loading': 'Chargement…',
   'onboarding.cash': 'Espèces',
 }
