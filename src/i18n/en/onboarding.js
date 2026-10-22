@@ -19,5 +19,6 @@ export default {
   'onboarding.lockNote': 'Final after your first transaction',
   'onboarding.accountsNote': 'The currency of your {n} accounts',
   'onboarding.accountsNoteOne': 'The currency of your account',
+  'onboarding.loading': 'Loading…',
   'onboarding.cash': 'Cash',
 }
