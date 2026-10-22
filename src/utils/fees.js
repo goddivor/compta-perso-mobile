@@ -8,8 +8,8 @@ import { t } from '../i18n'
 
 export { FEE_RULE_KINDS }
 
-// Fee of one rule for a base amount → integer FCFA, or null (no base,
-// invalid rule, or above the last tier). Tiers: first tier whose max covers the base.
+// Fee of one rule for a base amount → integer amount in the profile
+// currency, or null (no base, invalid rule, or above the last tier). Tiers: first tier whose max covers the base.
 export const computeFee = (rule, base) => feeFromRule(rule, base)
 
 // Suggestion chips for a base amount: [{ rule, fee, label }], rules giving no fee skipped

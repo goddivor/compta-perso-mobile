@@ -1,9 +1,10 @@
 // Minimal i18n: flat dictionaries (fr = reference, en), one file per area
 // under fr/ and en/ (merged by fr.js / en.js), simple {x}
 // interpolation, language persisted in AsyncStorage ('system' | 'fr' | 'en',
-// default 'system'), system detection via expo-localization with a French
-// fallback. The provider also keeps the date/number locale of utils/format
-// in sync so every formatted date/amount follows the active language.
+// default 'system'), system detection via expo-localization with an English
+// fallback (a phone language other than fr/en gets English). The provider
+// also keeps the date/number locale of utils/format in sync so every
+// formatted date/amount follows the active language.
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { getLocales } from 'expo-localization'
@@ -34,13 +35,14 @@ if (typeof __DEV__ !== 'undefined' && __DEV__) {
   if (missingFr.length) console.warn(`i18n: missing in fr: ${missingFr.join(', ')}`)
 }
 
-// Language of the phone, restricted to the supported ones (fallback: fr)
+// Language of the phone, restricted to the supported ones (fallback: en)
+export const FALLBACK_LANGUAGE = 'en'
 export function systemLanguage() {
   try {
     const code = getLocales()[0]?.languageCode
-    return DICTS[code] ? code : 'fr'
+    return DICTS[code] ? code : FALLBACK_LANGUAGE
   } catch {
-    return 'fr'
+    return FALLBACK_LANGUAGE
   }
 }
 
@@ -56,9 +58,13 @@ function interpolate(str, vars) {
 // Module-level current language so non-React code (updater, sync api) can
 // translate too. The provider keeps it up to date.
 let currentLang = systemLanguage()
+setFormatLocale(LOCALES[currentLang])
+
+// The resolved language ('fr' | 'en') t() currently translates into
+export const currentLanguage = () => currentLang
 
 export function t(key, vars) {
-  const str = DICTS[currentLang][key] ?? fr[key] ?? key
+  const str = DICTS[currentLang][key] ?? DICTS[FALLBACK_LANGUAGE][key] ?? key
   return interpolate(str, vars)
 }
 
@@ -93,7 +99,7 @@ export function I18nProvider({ children }) {
       locale: LOCALES[lang],
       setLanguage,
       t: (key, vars) => {
-        const str = DICTS[lang][key] ?? fr[key] ?? key
+        const str = DICTS[lang][key] ?? DICTS[FALLBACK_LANGUAGE][key] ?? key
         return interpolate(str, vars)
       },
     }),
