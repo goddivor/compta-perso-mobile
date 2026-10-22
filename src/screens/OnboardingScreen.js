@@ -186,10 +186,15 @@ export default function OnboardingScreen({ navigation, route }) {
 
   const openAccount = (params) => toTabs({ name: 'AccountForm', params })
 
+  // The operators of the profile country are still loading (also true on the
+  // first render of the step, before the hook's effect flags it as loading):
+  // the search field shows, disabled, and skeleton tiles hold the grid's place
+  const opsLoading = withAccountStep && step === 2 && !isoMode && !!iso2 && !operators.data && !operators.error
+
   /* -------------------------------- render -------------------------------- */
   const title = [t('onboarding.country'), t('onboarding.currency'), t('onboarding.account')][step]
   const offline = step === 0 && !countries.data && !countries.loading && countries.error
-  const showSearch = !offline && ((step === 0) || (step === 1 && isoMode && (currencies.data || fallback)) || (step === 2 && !isoMode && iso2 && !operators.error && operators.data))
+  const showSearch = !offline && ((step === 0) || (step === 1 && isoMode && (currencies.data || fallback)) || (step === 2 && !isoMode && iso2 && !operators.error && (operators.data || opsLoading)))
   const placeholder = step === 0 ? t('onboarding.search') : step === 1 ? t('onboarding.currencySearch') : searchPlaceholder(t, opCount)
   const noCountry = step === 0 && !!query.trim() && countryRows.length === 0
 
@@ -234,6 +239,7 @@ export default function OnboardingScreen({ navigation, route }) {
             value={query}
             numberOfLines={1}
             onChangeText={setQuery}
+            editable={!opsLoading}
             placeholder={placeholder}
             placeholderTextColor={colors.muted}
             autoCorrect={false}
@@ -313,7 +319,16 @@ export default function OnboardingScreen({ navigation, route }) {
           )
         ) : (
           <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingTop: 8, paddingBottom: 110 }}>
-            {opList.length ? (
+            {opsLoading ? (
+              <View style={styles.grid} accessible accessibilityLabel={t('onboarding.loading')} accessibilityState={{ busy: true }}>
+                {Array.from({ length: DEFAULT_OPERATORS }, (_, i) => (
+                  <View key={i} style={[styles.op, { width: tileW, backgroundColor: colors.surface }]}>
+                    <View style={[styles.skelLogo, { backgroundColor: colors.surface2 }]} />
+                    <View style={[styles.skelName, { backgroundColor: colors.surface2 }]} />
+                  </View>
+                ))}
+              </View>
+            ) : opList.length ? (
               <View style={styles.grid}>
                 {opList.map((o) => (
                   <Pressable
@@ -410,6 +425,8 @@ const styles = StyleSheet.create({
   noteText: { fontFamily: fonts.regular, fontSize: 12 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, paddingHorizontal: 16 },
   op: { paddingTop: 14, paddingBottom: 12, paddingHorizontal: 8, borderRadius: 18, alignItems: 'center', gap: 8 },
+  skelLogo: { width: 48, height: 48, borderRadius: Math.round(48 * 0.28) },
+  skelName: { width: '70%', height: 12, marginVertical: 2, borderRadius: radius.pill },
   opName: { fontFamily: fonts.medium, fontSize: 12, lineHeight: 16, textAlign: 'center' },
   searchAll: { marginHorizontal: 16, marginTop: 4, minHeight: 48, paddingHorizontal: 12, borderRadius: 18, flexDirection: 'row', alignItems: 'center', gap: 12 },
   searchAllText: { flex: 1, fontFamily: fonts.semibold, fontSize: 14 },
