@@ -50,7 +50,8 @@ export async function currencyLabel(code, iso2, { cacheOnly = false } = {}) {
 
 const operatorsPath = (iso2) => `data/operators/${String(iso2).toUpperCase()}.json`
 
-// Operators of one country: [{ id, name, aliases, type, group, status, logo: { svg, background } | null }]
+// Operators of one country: [{ id, name, aliases, type, group, status, presence, logo: { svg, background } | null }]
+// presence (registry v1.2.0): number of countries where the brand exists, >= 1
 export async function getOperators(iso2) {
   const file = await getJson(operatorsPath(iso2))
   // index by id for getOperator / peekOperator

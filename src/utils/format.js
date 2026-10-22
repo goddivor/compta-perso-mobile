@@ -34,6 +34,13 @@ export const fmtParts = (n, type = null) => {
   return { sign, number: fmtNumber(Math.abs(v)), currency: CURRENCY_LABEL }
 }
 
+// First letter upper-cased in the app locale: CLDR names some currencies in
+// lower case in French ('naira nigérian'), shown alone they read as a title
+export const capitalizeFirst = (s) => {
+  const str = String(s ?? '')
+  return str ? str.charAt(0).toLocaleUpperCase(locale) + str.slice(1) : str
+}
+
 export const fmtDate = (s) =>
   s ? new Date(String(s).slice(0, 10) + 'T00:00:00').toLocaleDateString(locale) : '—'
 

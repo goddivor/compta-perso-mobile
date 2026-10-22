@@ -4,7 +4,7 @@
 // confirm. Only setProfile() is called: no amount, account or transaction is
 // ever converted or changed. Going back out of the flow is blocked; it ends
 // with navigation.reset to 'Tabs'.
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { View, Text, TextInput, Pressable, FlatList, ScrollView, BackHandler, Alert, StyleSheet, useWindowDimensions } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import Ionicons from '@expo/vector-icons/Ionicons'
@@ -15,8 +15,10 @@ import { listAccounts, setProfile } from '../db/database'
 import { useRefresh } from '../context/AppContext'
 import { EmptyState, Flag, CurrencySign, LogoTile } from '../components/v2'
 import { useCountries, useCurrencies, useOperators, searchCountries, searchOperators, normalizeText } from '../registry'
+import { activeOperatorCount, searchPlaceholder, showSearchAll } from '../data/accountForm'
+import { popularOperators } from '../data/popularOperators'
+import { capitalizeFirst } from '../utils/format'
 
-const TYPE_ORDER = { mobile_money: 0, bank: 1, fintech: 2, microfinance: 3 }
 const DEFAULT_OPERATORS = 6
 
 // Offline fallback: active ISO 4217 codes, used only when the registry's
@@ -164,14 +166,23 @@ export default function OnboardingScreen({ navigation, route }) {
   const operators = useOperators(withAccountStep && step === 2 && !isoMode ? iso2 : null)
   const { width } = useWindowDimensions()
   const tileW = Math.floor((width - 32 - 20) / 3)
+  const opCount = activeOperatorCount(operators.data)
   const opList = useMemo(() => {
     const active = (operators.data || []).filter((o) => (o.status || 'active') === 'active')
     if (query.trim()) return searchOperators(active, query, { limit: 12 })
-    return active
-      .filter((o) => o.logo?.svg)
-      .sort((a, b) => (TYPE_ORDER[a.type] ?? 9) - (TYPE_ORDER[b.type] ?? 9) || a.name.localeCompare(b.name))
-      .slice(0, DEFAULT_OPERATORS)
+    return popularOperators(operators.data, DEFAULT_OPERATORS, { logoOnly: true })
   }, [operators.data, query])
+
+  // "Not listed? Search all N" focuses the search field. Android does not
+  // reopen the keyboard on focus() of an input that kept the focus after the
+  // keyboard was dismissed: blur it first
+  const searchRef = useRef(null)
+  const focusSearch = useCallback(() => {
+    const input = searchRef.current
+    if (!input) return
+    if (input.isFocused()) input.blur()
+    requestAnimationFrame(() => input.focus())
+  }, [])
 
   const openAccount = (params) => toTabs({ name: 'AccountForm', params })
 
@@ -179,7 +190,7 @@ export default function OnboardingScreen({ navigation, route }) {
   const title = [t('onboarding.country'), t('onboarding.currency'), t('onboarding.account')][step]
   const offline = step === 0 && !countries.data && !countries.loading && countries.error
   const showSearch = !offline && ((step === 0) || (step === 1 && isoMode && (currencies.data || fallback)) || (step === 2 && !isoMode && iso2 && !operators.error && operators.data))
-  const placeholder = step === 0 ? t('onboarding.search') : step === 1 ? t('onboarding.currencySearch') : t('onboarding.accountSearch')
+  const placeholder = step === 0 ? t('onboarding.search') : step === 1 ? t('onboarding.currencySearch') : searchPlaceholder(t, opCount)
   const noCountry = step === 0 && !!query.trim() && countryRows.length === 0
 
   let foot = null
@@ -219,7 +230,9 @@ export default function OnboardingScreen({ navigation, route }) {
         <View style={[styles.search, { backgroundColor: colors.surface2 }]}>
           <Ionicons name="search" size={22} color={colors.muted} />
           <TextInput
+            ref={searchRef}
             value={query}
+            numberOfLines={1}
             onChangeText={setQuery}
             placeholder={placeholder}
             placeholderTextColor={colors.muted}
@@ -283,7 +296,7 @@ export default function OnboardingScreen({ navigation, route }) {
                       <CurrencySign code={cur.code} size={36} colored />
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={[styles.curName, { color: colors.ink }]} numberOfLines={2}>{cur.name[lang] || cur.name.en}</Text>
+                      <Text style={[styles.curName, { color: colors.ink }]} numberOfLines={2}>{capitalizeFirst(cur.name[lang] || cur.name.en)}</Text>
                       <Text style={[styles.curCode, { color: colors.muted }]}>{cur.code}{sign}</Text>
                     </View>
                     <View style={[styles.radio, { borderColor: sel ? colors.ink : colors.faint, borderWidth: sel ? 7 : 2 }]} />
@@ -316,6 +329,16 @@ export default function OnboardingScreen({ navigation, route }) {
               </View>
             ) : query.trim() ? (
               <Text style={[styles.empty, { color: colors.muted }]}>{t('onboarding.noResult')}</Text>
+            ) : null}
+            {!query.trim() && showSearchAll(opCount, opList.length) ? (
+              <Pressable
+                onPress={focusSearch}
+                accessibilityRole="button"
+                style={({ pressed }) => [styles.searchAll, pressed && { backgroundColor: colors.surface2 }]}
+              >
+                <Ionicons name="search" size={18} color={colors.link} />
+                <Text numberOfLines={1} style={[styles.searchAllText, { color: colors.link }]}>{t('accountForm.searchAll', { n: opCount })}</Text>
+              </Pressable>
             ) : null}
             <Pressable
               onPress={() => openAccount({ type: 'PHYSICAL' })}
@@ -388,6 +411,8 @@ const styles = StyleSheet.create({
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, paddingHorizontal: 16 },
   op: { paddingTop: 14, paddingBottom: 12, paddingHorizontal: 8, borderRadius: 18, alignItems: 'center', gap: 8 },
   opName: { fontFamily: fonts.medium, fontSize: 12, lineHeight: 16, textAlign: 'center' },
+  searchAll: { marginHorizontal: 16, marginTop: 4, minHeight: 48, paddingHorizontal: 12, borderRadius: 18, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  searchAllText: { flex: 1, fontFamily: fonts.semibold, fontSize: 14 },
   empty: { fontFamily: fonts.regular, fontSize: 14, textAlign: 'center', paddingVertical: 24 },
   cash: { marginHorizontal: 16, marginTop: 12, minHeight: 64, paddingHorizontal: 16, borderRadius: 18, flexDirection: 'row', alignItems: 'center', gap: 14 },
   cashName: { flex: 1, fontFamily: fonts.medium, fontSize: 15 },

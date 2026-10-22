@@ -6,7 +6,6 @@ export default {
   'onboarding.account': 'Your first account',
   'onboarding.search': 'Search',
   'onboarding.currencySearch': 'Currency or code',
-  'onboarding.accountSearch': 'Bank, mobile money…',
   'onboarding.suggested': 'Suggested',
   'onboarding.all': 'All',
   'onboarding.continue': 'Continue',
