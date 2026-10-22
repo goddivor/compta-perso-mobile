@@ -84,7 +84,18 @@ function Tabs() {
           borderTopColor: colors.line,
         },
         tabBarHideOnKeyboard: true,
-        tabBarLabelStyle: { fontFamily: fonts.medium, fontSize: 10 },
+        // One line that shrinks to fit a narrow tab ('Transactions' on a
+        // small phone or a large system font) instead of being truncated
+        tabBarLabel: ({ color, children }) => (
+          <Text
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.6}
+            style={{ fontFamily: fonts.medium, fontSize: 10, color, textAlign: 'center', maxWidth: '100%', paddingHorizontal: 2 }}
+          >
+            {children}
+          </Text>
+        ),
         tabBarIcon: ({ focused, color }) => (
           <Ionicons name={TAB_ICONS[route.name][focused ? 0 : 1]} size={21} color={color} />
         ),
