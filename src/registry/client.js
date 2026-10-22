@@ -6,7 +6,7 @@
 // network) or 'not_found' (HTTP 404); screens translate them.
 import * as FileSystem from 'expo-file-system/legacy'
 
-export const REGISTRY_TAG = 'v1.1.0'
+export const REGISTRY_TAG = 'v1.2.0'
 export const REGISTRY_BASE = `https://cdn.jsdelivr.net/gh/goddivor/compta-perso-registry@${REGISTRY_TAG}/`
 const CACHE_DIR = `${FileSystem.documentDirectory}registry/${REGISTRY_TAG}/`
 const TIMEOUT_MS = 15000

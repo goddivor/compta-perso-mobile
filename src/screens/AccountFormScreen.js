@@ -26,10 +26,11 @@ import {
   kindControls, saveBeforeRule, isActiveOperator, popularTitle, balanceToSave,
   activeOperatorCount, searchPlaceholder, showSearchAll,
 } from '../data/accountForm'
+import { popularOperators, OPERATOR_TYPE_ORDER } from '../data/popularOperators'
 import { feeRuleLabel } from '../utils/fees'
 import { CURRENCY_LABEL } from '../utils/format'
 
-const TYPE_ORDER = ['mobile_money', 'bank', 'microfinance', 'fintech']
+const TYPE_ORDER = OPERATOR_TYPE_ORDER
 const GROUP_LIMIT = 4
 const SUGGESTION_COUNT = 6
 
@@ -130,12 +131,7 @@ function OperatorSearch({ countryIso2, linkMode, canUnlink, onPickOperator, onPi
   }, [operators, q])
 
   const suggestions = useMemo(() => {
-    if (!operators) return []
-    const rank = (o) => TYPE_ORDER.indexOf(o.type) * 2 + (o.logo?.svg ? 0 : 1)
-    return operators
-      .filter(isActiveOperator)
-      .sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name))
-      .slice(0, SUGGESTION_COUNT)
+    return popularOperators(operators, SUGGESTION_COUNT)
   }, [operators])
 
   return (
