@@ -55,6 +55,25 @@ export function getText(path) {
   return memory.get(path)
 }
 
+// Raw text of a registry file from memory or the file cache only, never
+// the network: null when it was never downloaded (fast, offline-safe boot).
+export async function getCachedText(path) {
+  if (memory.has(path)) return memory.get(path)
+  const uri = cacheUri(path)
+  const info = await FileSystem.getInfoAsync(uri)
+  return info.exists ? FileSystem.readAsStringAsync(uri) : null
+}
+
+// Parsed JSON of a cached registry file, or null (see getCachedText)
+export async function getCachedJson(path) {
+  if (values.has(path)) return values.get(path)
+  const text = await getCachedText(path)
+  if (text == null) return null
+  const v = JSON.parse(text)
+  values.set(path, v)
+  return v
+}
+
 // Parsed JSON of a registry file (cached parse)
 export async function getJson(path) {
   if (values.has(path)) return values.get(path)

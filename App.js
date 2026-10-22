@@ -2,6 +2,8 @@
 // navigation tree (bottom tabs + native stack for the form screens).
 // Theme: ThemeProvider (system / forced light / forced dark, persisted).
 // Perf: tabs are lazy and frozen when blurred; inactive screens detached.
+// Currency: the label of every amount is resolved at boot from the profile
+// (CurrencyProvider keeps it in step with later profile changes).
 // Onboarding gate: while the profile has no currency, the Onboarding route
 // opens on top of the tabs at launch (owner's upgraded data included); the
 // update sheet and the Drive auto-backup wait until the profile is complete.
@@ -28,6 +30,8 @@ import { getDb, getProfile, listAccounts } from './src/db/database'
 import { AppProvider } from './src/context/AppContext'
 import { FiltersProvider } from './src/context/FiltersContext'
 import { PrivacyProvider } from './src/context/PrivacyContext'
+import { CurrencyProvider, resolveProfileCurrencyLabel } from './src/context/CurrencyContext'
+import { setCurrencyLabel } from './src/utils/format'
 import FilterScreen from './src/screens/FilterScreen'
 import HomeScreen from './src/screens/HomeScreen'
 import TransactionsScreen from './src/screens/TransactionsScreen'
@@ -289,12 +293,23 @@ export default function App() {
   const [dbError, setDbError] = useState(null)
 
   useEffect(() => {
+    let alive = true
     try {
       getDb()
-      setDbReady(true)
     } catch (e) {
       setDbError(e.message)
+      return undefined
     }
+    // Currency label of the amounts before the first render (registry file
+    // cache only, never the network; the ISO code when not cached)
+    resolveProfileCurrencyLabel({ cacheOnly: true })
+      .catch(() => '')
+      .then((label) => {
+        if (!alive) return
+        setCurrencyLabel(label)
+        setDbReady(true)
+      })
+    return () => { alive = false }
   }, [])
 
   if (!fontsLoaded || (!dbReady && !dbError)) {
@@ -321,11 +336,13 @@ export default function App() {
       <ThemeProvider>
         <I18nProvider>
           <AppProvider>
-            <FiltersProvider>
-              <PrivacyProvider>
-                <Root />
-              </PrivacyProvider>
-            </FiltersProvider>
+            <CurrencyProvider>
+              <FiltersProvider>
+                <PrivacyProvider>
+                  <Root />
+                </PrivacyProvider>
+              </FiltersProvider>
+            </CurrencyProvider>
           </AppProvider>
         </I18nProvider>
       </ThemeProvider>
