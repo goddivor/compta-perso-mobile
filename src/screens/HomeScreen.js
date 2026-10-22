@@ -15,6 +15,7 @@ import { useFocusData } from '../hooks/useFocusData'
 import { useProfile } from '../hooks/useProfile'
 import { useI18n } from '../i18n'
 import { useCurrency } from '../registry'
+import { capitalizeFirst } from '../utils/format'
 import { Fab, EmptyState, LogoTile, Amount, Flag, CurrencySign, TransactionRow } from '../components/v2'
 
 const LATEST_COUNT = 10
@@ -38,7 +39,9 @@ function buildLatest(rows) {
   return out
 }
 
-const AccountCard = memo(function AccountCard({ account, onPress }) {
+// `lang` keys the Amount: Amount is memoized on its value, so it would keep
+// the previous language's number format (47,500 → 47 500) until remounted
+const AccountCard = memo(function AccountCard({ account, onPress, lang }) {
   const { colors } = useTheme()
   const handlePress = useCallback(() => onPress(account.id), [onPress, account.id])
   return (
@@ -54,7 +57,7 @@ const AccountCard = memo(function AccountCard({ account, onPress }) {
         icon={account.type === 'PHYSICAL' ? 'cash-outline' : undefined}
       />
       <Text numberOfLines={2} style={[styles.accName, { color: colors.ink }]}>{account.name}</Text>
-      <Amount value={account.current_balance} size={17} weight="bold" />
+      <Amount key={lang} value={account.current_balance} size={17} weight="bold" />
     </Pressable>
   )
 })
@@ -92,7 +95,7 @@ export default function HomeScreen({ navigation }) {
   const currencyName = useMemo(() => {
     const n = currency?.name
     if (!n) return profile.currency || ''
-    return typeof n === 'string' ? n : n[lang] || n.en || profile.currency || ''
+    return capitalizeFirst(typeof n === 'string' ? n : n[lang] || n.en || profile.currency || '')
   }, [currency, lang, profile.currency])
 
   const openAccount = useCallback(
@@ -110,8 +113,8 @@ export default function HomeScreen({ navigation }) {
   )
 
   const renderAccount = useCallback(
-    ({ item }) => <AccountCard account={item} onPress={openAccount} />,
-    [openAccount]
+    ({ item }) => <AccountCard account={item} onPress={openAccount} lang={lang} />,
+    [openAccount, lang]
   )
   const accountKey = useCallback((item) => String(item.id), [])
   const latestKey = useCallback((item) => String(item.tx.id), [])
@@ -162,7 +165,7 @@ export default function HomeScreen({ navigation }) {
           <Text numberOfLines={1} style={[styles.curText, { color: colors.primaryInk }]}>{currencyName}</Text>
         </View>
       </View>
-      <Amount value={summary.total} size={42} weight="bold" color={colors.primaryInk} style={styles.balAmount} />
+      <Amount key={lang} value={summary.total} size={42} weight="bold" color={colors.primaryInk} style={styles.balAmount} />
     </View>
   )
 
@@ -201,6 +204,7 @@ export default function HomeScreen({ navigation }) {
         data={summary.accounts}
         keyExtractor={accountKey}
         renderItem={renderAccount}
+        extraData={lang}
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.accsContent}
         // The footer wrapper is a column View: make it a row so the tile

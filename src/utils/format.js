@@ -1,27 +1,44 @@
 // Currency and date formatting helpers. The active locale follows the app
-// language (set by the I18nProvider via setFormatLocale); default fr-FR.
-// The currency label "FCFA" is intentionally kept as-is in every language.
+// language (set by the I18nProvider via setFormatLocale); default en-US.
+// The currency label is the profile currency's symbol, set at start and on
+// every profile change by the CurrencyProvider (context/CurrencyContext.js)
+// through setCurrencyLabel: the registry's local symbol ('R', '₦', 'F CFA'),
+// or the ISO code while the registry is not cached. Empty before onboarding.
 
-let locale = 'fr-FR'
-export const setFormatLocale = (l) => { locale = l || 'fr-FR' }
+let locale = 'en-US'
+export const setFormatLocale = (l) => { locale = l || 'en-US' }
 export const getFormatLocale = () => locale
+
+// Live binding: modules importing CURRENCY_LABEL read the current value at
+// use time (ES module semantics, kept by Metro's CommonJS transform).
+export let CURRENCY_LABEL = ''
+export const setCurrencyLabel = (label) => { CURRENCY_LABEL = label ? String(label) : '' }
+export const getCurrencyLabel = () => CURRENCY_LABEL
 
 export const fmtNumber = (n) =>
   new Intl.NumberFormat(locale).format(Math.round(n || 0))
 
-export const fmt = (n) => fmtNumber(n) + ' FCFA' // CURRENCY_LABEL
+// "12 500 R", or the bare number while no currency is known
+export const fmt = (n) => (CURRENCY_LABEL ? fmtNumber(n) + ' ' + CURRENCY_LABEL : fmtNumber(n))
 
 export const fmtSigned = (type, n) =>
   (type === 'CREDIT' ? '+' : '-') + fmt(n)
 
 // v2 split form of fmt() for styled amounts (number and a quieter currency
 // suffix): { sign, number, currency }. sign is '+' (CREDIT), '−' (U+2212,
-// DEBIT or a negative balance) or ''. fmt(n) === number + ' ' + currency.
-export const CURRENCY_LABEL = 'FCFA'
+// DEBIT or a negative balance) or ''. fmt(n) === number + ' ' + currency
+// (currency '' → fmt(n) === number).
 export const fmtParts = (n, type = null) => {
   const v = Math.round(n || 0)
   const sign = type === 'CREDIT' ? '+' : type === 'DEBIT' || (!type && v < 0) ? '\u2212' : ''
   return { sign, number: fmtNumber(Math.abs(v)), currency: CURRENCY_LABEL }
+}
+
+// First letter upper-cased in the app locale: CLDR names some currencies in
+// lower case in French ('naira nigérian'), shown alone they read as a title
+export const capitalizeFirst = (s) => {
+  const str = String(s ?? '')
+  return str ? str.charAt(0).toLocaleUpperCase(locale) + str.slice(1) : str
 }
 
 export const fmtDate = (s) =>

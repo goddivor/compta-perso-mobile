@@ -1,7 +1,7 @@
 // Registry getters (countries, currencies, operators, SVG art).
 // Data shapes: registry/SCHEMA.md (countries[], currencies[], operators[]).
 // Every getter is async: memory, then file cache, then network.
-import { getText, getJson, peek, remember, REGISTRY_TAG, REGISTRY_BASE } from './client'
+import { getText, getJson, getCachedJson, peek, remember, REGISTRY_TAG, REGISTRY_BASE } from './client'
 import { logoLayout } from './logo'
 
 export { REGISTRY_TAG, REGISTRY_BASE, logoLayout }
@@ -22,9 +22,36 @@ export const getCurrency = async (code) => (await getCurrencies()).find((c) => c
 export const currencySymbol = (currency, iso2) =>
   currency ? (currency.localSymbols?.[iso2] ?? currency.narrowSymbol ?? currency.symbol) : ''
 
+// Invisible characters a symbol may carry (zero-width, bidi marks, BOM)
+const INVISIBLE = /[\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/g
+
+// Label amounts carry for a currency code in a country: the registry symbol
+// (currencySymbol) when the currency is known and the symbol is visible,
+// the ISO code otherwise (registry not cached, code unknown to it). Spaces
+// inside the symbol are dropped ('F CFA' becomes one token): the label
+// follows the number after one space, and fr-FR uses the same narrow space
+// (U+202F) as thousands separator, so "1 234 F CFA" would read as a longer
+// number.
+//   cacheOnly: read the registry from memory or the file cache only (boot);
+//   a failed or offline read also falls back to the code. '' for no code.
+export async function currencyLabel(code, iso2, { cacheOnly = false } = {}) {
+  if (!code) return ''
+  try {
+    const file = cacheOnly ? await getCachedJson('data/currencies.json') : await getJson('data/currencies.json')
+    const cur = file?.currencies?.find((c) => c.code === code)
+    const symbol = currencySymbol(cur, iso2 ? String(iso2).toUpperCase() : iso2)
+    const compact = symbol ? symbol.replace(/\s+/g, '') : ''
+    return compact.replace(INVISIBLE, '') ? compact : code
+  } catch (e) {
+    if (!e?.code) console.warn('currency label: registry read failed', code, e?.message)
+    return code
+  }
+}
+
 const operatorsPath = (iso2) => `data/operators/${String(iso2).toUpperCase()}.json`
 
-// Operators of one country: [{ id, name, aliases, type, group, status, logo: { svg, background } | null }]
+// Operators of one country: [{ id, name, aliases, type, group, status, presence, logo: { svg, background } | null }]
+// presence (registry v1.2.0): number of countries where the brand exists, >= 1
 export async function getOperators(iso2) {
   const file = await getJson(operatorsPath(iso2))
   // index by id for getOperator / peekOperator

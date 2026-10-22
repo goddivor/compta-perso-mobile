@@ -38,12 +38,25 @@ const COUNTRY_IN = {
 }
 const IN_KEY = { au: 'Au', en: 'En', aux: 'Aux', a: 'A' }
 
-// "Suggestions au Togo" · "Suggestions in Togo" · "Suggestions · Xyz" (no known preposition)
-export function suggestionsTitle(t, lang, country) {
-  if (!country) return t('accountForm.suggestionsNone')
+// Number of operators the user can pick in the profile country, or null while
+// the registry is still loading (or offline without a cache)
+export const activeOperatorCount = (operators) =>
+  (operators ? operators.filter(isActiveOperator).length : null)
+
+// One short line, with the count once it is known: "Search 42 banks & wallets"
+export function searchPlaceholder(t, count) {
+  return count ? t('accountForm.searchPlaceholderCount', { n: count }) : t('accountForm.searchPlaceholder')
+}
+
+// "Not listed? Search all 42": only when the popular list does not show them all
+export const showSearchAll = (count, shown) => !!count && count > shown
+
+// "Les plus utilisés au Togo" · "Popular in Togo" · "Popular · Xyz" (no known preposition)
+export function popularTitle(t, lang, country) {
+  if (!country) return t('accountForm.popularNone')
   const name = country.name?.[lang] || country.name?.en || country.iso2
   const prep = Object.keys(COUNTRY_IN).find((p) => COUNTRY_IN[p].includes(country.iso2))
   return prep
-    ? t(`accountForm.suggestions${IN_KEY[prep]}`, { country: name })
-    : t('accountForm.suggestions', { country: name })
+    ? t(`accountForm.popular${IN_KEY[prep]}`, { country: name })
+    : t('accountForm.popular', { country: name })
 }

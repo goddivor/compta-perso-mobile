@@ -9,16 +9,21 @@
 // - profile: singleton row (id = 1) holding country_iso2 and currency
 // - accounts.operator_id / operator_dismissed: registry operator link
 // - categories.icon: Ionicons name (NULL or '' = monogram fallback)
+// - categories.builtin_key: stable key of a built-in category ('food',
+//   'bills'…, NULL = user-created); its name is shown translated while it
+//   is still a default name (see categoryLabel)
 // - fee_rules: several suggestion rules per account (percent, fixed, tiers)
 // Columns are added after a PRAGMA table_info check; one-shot data steps
-// (fee rules from fees_rate, built-in category icons) run once, guarded by
-// PRAGMA user_version.
+// (fee rules from fees_rate, built-in category icons, built-in category
+// keys) run once, guarded by PRAGMA user_version.
 import { openDatabaseSync } from 'expo-sqlite'
+import { t } from '../i18n'
 
 let db = null
 
 // Current data-migration level stored in PRAGMA user_version
-const DATA_VERSION = 1
+// (1: fee rules + category icons, 2: built-in category keys)
+const DATA_VERSION = 2
 
 export function getDb() {
   if (!db) {
@@ -40,7 +45,7 @@ function initSchema() {
       type TEXT NOT NULL CHECK(type IN ('ELECTRONIC','PHYSICAL')),
       provider TEXT,
       initial_balance REAL NOT NULL DEFAULT 0,
-      currency TEXT NOT NULL DEFAULT 'FCFA',
+      currency TEXT NOT NULL DEFAULT '',
       color TEXT DEFAULT '#3B82F6',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       position INTEGER DEFAULT 0,
@@ -54,7 +59,8 @@ function initSchema() {
       name TEXT NOT NULL,
       flow TEXT NOT NULL CHECK(flow IN ('DEBIT','CREDIT','BOTH')),
       color TEXT DEFAULT '#6B7280',
-      icon TEXT
+      icon TEXT,
+      builtin_key TEXT DEFAULT NULL
     );
 
     CREATE TABLE IF NOT EXISTS forecast_sessions (
@@ -105,6 +111,7 @@ function initSchema() {
   addColumnIfMissing('accounts', 'operator_id', 'TEXT DEFAULT NULL')
   addColumnIfMissing('accounts', 'operator_dismissed', 'INTEGER DEFAULT 0')
   addColumnIfMissing('categories', 'icon', 'TEXT')
+  addColumnIfMissing('categories', 'builtin_key', 'TEXT DEFAULT NULL')
   addColumnIfMissing('transactions', 'fees', 'REAL DEFAULT 0')
 
   // The profile always has its single row; currency NULL = onboarding needed
@@ -147,28 +154,88 @@ function normalizeName(name) {
   return String(name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase()
 }
 
+// Built-in categories: stable key, the default names they were ever seeded
+// with (fr, en; matched without accents or case, so the v1 'Sante' and
+// 'Vetements' count), flow and colour. The shown name comes from
+// t('categories.builtin.<key>'); fr/en here must match the dictionaries.
+const BUILTIN_CATEGORIES = [
+  { key: 'food', fr: 'Nourriture', en: 'Food', flow: 'DEBIT', color: '#F59E0B' },
+  { key: 'fuel', fr: 'Essence', en: 'Fuel', flow: 'DEBIT', color: '#EF4444' },
+  { key: 'transport', fr: 'Transport', en: 'Transport', flow: 'DEBIT', color: '#8B5CF6' },
+  { key: 'health', fr: 'Santé', en: 'Health', flow: 'DEBIT', color: '#EC4899' },
+  { key: 'clothes', fr: 'Vêtements', en: 'Clothes', flow: 'DEBIT', color: '#06B6D4' },
+  { key: 'leisure', fr: 'Loisirs', en: 'Leisure', flow: 'DEBIT', color: '#84CC16' },
+  { key: 'bills', fr: 'Factures', en: 'Bills', flow: 'DEBIT', color: '#F97316' },
+  { key: 'salary', fr: 'Salaire', en: 'Salary', flow: 'CREDIT', color: '#10B981' },
+  { key: 'freelance', fr: 'Freelance', en: 'Freelance', flow: 'CREDIT', color: '#3B82F6' },
+  { key: 'withdrawal', fr: 'Retrait', en: 'Withdrawal', flow: 'BOTH', color: '#6B7280' },
+  { key: 'other', fr: 'Autres', en: 'Other', flow: 'BOTH', color: '#94A3B8' },
+]
+
+// key → Set of its normalized default names; normalized name → key
+const BUILTIN_NAMES = new Map(
+  BUILTIN_CATEGORIES.map((c) => [c.key, new Set([normalizeName(c.fr), normalizeName(c.en)])])
+)
+const BUILTIN_KEY_BY_NAME = new Map(
+  BUILTIN_CATEGORIES.flatMap((c) => [[normalizeName(c.fr), c.key], [normalizeName(c.en), c.key]])
+)
+
+// Ionicons name of a built-in key, through the name-keyed icon table
+const builtinIcon = (c) => BUILTIN_CATEGORY_ICONS[normalizeName(c.fr)] || null
+
+// Name to show for a category: a built-in one still carrying a default
+// name (fr or en, accent- and case-insensitive) is shown in the current
+// language; a renamed or user-created one shows its stored name as typed.
+// The stored name is never changed.
+export function categoryLabel(builtinKey, name) {
+  if (builtinKey && BUILTIN_NAMES.get(builtinKey)?.has(normalizeName(name))) {
+    return t(`categories.builtin.${builtinKey}`)
+  }
+  return name
+}
+
+// Rows from a categories query (name + builtin_key) with the shown name
+const labelCategory = (row) => (row ? { ...row, name: categoryLabel(row.builtin_key, row.name) } : row)
+
+// Rows carrying category_name + category_builtin_key (transaction lists)
+const labelTxCategory = (row) =>
+  row.category_builtin_key ? { ...row, category_name: categoryLabel(row.category_builtin_key, row.category_name) } : row
+
+const byName = (a, b) => String(a.name ?? '').localeCompare(String(b.name ?? ''))
+
+// Fresh install: the built-in categories, named in the current language
+// (the phone's on a first launch)
 function seedDefaults() {
   const { c } = db.getFirstSync('SELECT COUNT(*) AS c FROM categories')
   if (c > 0) return
 
-  const cats = [
-    { name: 'Nourriture', flow: 'DEBIT', color: '#F59E0B' },
-    { name: 'Essence', flow: 'DEBIT', color: '#EF4444' },
-    { name: 'Transport', flow: 'DEBIT', color: '#8B5CF6' },
-    { name: 'Sante', flow: 'DEBIT', color: '#EC4899' },
-    { name: 'Vetements', flow: 'DEBIT', color: '#06B6D4' },
-    { name: 'Loisirs', flow: 'DEBIT', color: '#84CC16' },
-    { name: 'Factures', flow: 'DEBIT', color: '#F97316' },
-    { name: 'Salaire', flow: 'CREDIT', color: '#10B981' },
-    { name: 'Freelance', flow: 'CREDIT', color: '#3B82F6' },
-    { name: 'Retrait', flow: 'BOTH', color: '#6B7280' },
-    { name: 'Autres', flow: 'BOTH', color: '#94A3B8' },
-  ]
-  for (const cat of cats) {
+  for (const cat of BUILTIN_CATEGORIES) {
     db.runSync(
-      'INSERT INTO categories (name, flow, color, icon) VALUES (?,?,?,?)',
-      [cat.name, cat.flow, cat.color, BUILTIN_CATEGORY_ICONS[normalizeName(cat.name)] || null]
+      'INSERT INTO categories (name, flow, color, icon, builtin_key) VALUES (?,?,?,?,?)',
+      [t(`categories.builtin.${cat.key}`), cat.flow, cat.color, builtinIcon(cat), cat.key]
     )
+  }
+}
+
+// Categories without a key whose name is a default name (fr or en,
+// ignoring case, accents and surrounding spaces) get the built-in key. One
+// row per key: when several rows carry the same default name, only the
+// lowest id gets it, and a key already held by a row is not given again
+// (same rule as desktop). Only builtin_key is written: no name, colour,
+// icon or flow changes; other categories are untouched. `onlyIds`
+// (optional) limits it to those ids (a restore passes the rows its snapshot
+// sent without a builtin_key field).
+function backfillBuiltinKeys(d, onlyIds) {
+  const taken = new Set(
+    d.getAllSync('SELECT DISTINCT builtin_key FROM categories WHERE builtin_key IS NOT NULL').map((r) => r.builtin_key)
+  )
+  let rows = d.getAllSync('SELECT id, name FROM categories WHERE builtin_key IS NULL ORDER BY id')
+  if (onlyIds) rows = rows.filter((row) => onlyIds.has(row.id))
+  for (const row of rows) {
+    const key = BUILTIN_KEY_BY_NAME.get(normalizeName(row.name))
+    if (!key || taken.has(key)) continue
+    taken.add(key)
+    d.runSync('UPDATE categories SET builtin_key=? WHERE id=?', [key, row.id])
   }
 }
 
@@ -187,7 +254,7 @@ function backfillCategoryIcons(d, onlyIds) {
 
 // Each account with a usable fees_rate and no fee rule gets one 'percent'
 // rule carrying that rate (same fraction: 0.01 = 1 %). A rate of 0 (it
-// would only suggest "0 FCFA") or outside ]0, 1] creates nothing. fees_rate
+// would only suggest a zero fee) or outside ]0, 1] creates nothing. fees_rate
 // itself is kept as is; existing rules are never touched.
 function backfillFeeRules(d) {
   const rows = d.getAllSync(`
@@ -209,8 +276,11 @@ function migrateData() {
   const { user_version } = db.getFirstSync('PRAGMA user_version')
   if (user_version >= DATA_VERSION) return
   db.withTransactionSync(() => {
-    backfillFeeRules(db)
-    backfillCategoryIcons(db)
+    if (user_version < 1) {
+      backfillFeeRules(db)
+      backfillCategoryIcons(db)
+    }
+    if (user_version < 2) backfillBuiltinKeys(db)
   })
   db.execSync(`PRAGMA user_version = ${DATA_VERSION}`)
 }
@@ -253,6 +323,9 @@ export function listAccounts() {
   `)
 }
 
+// ISO code of the profile currency ('' before onboarding): new accounts carry it
+const profileCurrency = (d) => d.getFirstSync('SELECT currency FROM profile WHERE id = 1')?.currency || ''
+
 // operator_id (optional): registry operator id, e.g. 'tg-mixx-by-yas'.
 // fees_rate (optional, a fraction): creates the account's percent fee rule,
 // in the same SQL transaction (see setPercentRule). Throws on a bad rate.
@@ -262,7 +335,7 @@ export function createAccount({ name, type, provider, initial_balance, color, fe
   d.withTransactionSync(() => {
     id = d.runSync(
       'INSERT INTO accounts (name,type,provider,initial_balance,currency,color,fees_rate,operator_id) VALUES (?,?,?,?,?,?,NULL,?)',
-      [name, type, provider || null, initial_balance || 0, 'FCFA', color || '#3B82F6', operator_id || null]
+      [name, type, provider || null, initial_balance || 0, profileCurrency(d), color || '#3B82F6', operator_id || null]
     ).lastInsertRowId
     d.runSync('UPDATE accounts SET position = ? WHERE id = ?', [id, id])
     if (fees_rate != null && fees_rate !== '') setPercentRule(d, id, fees_rate)
@@ -316,10 +389,12 @@ export function deleteAccount(id) {
 
 /* ----------------------------- Categories ------------------------------ */
 
+// Shown names (categoryLabel), sorted by shown name
 export function listCategories() {
-  return getDb().getAllSync('SELECT * FROM categories ORDER BY name')
+  return getDb().getAllSync('SELECT * FROM categories ORDER BY name').map(labelCategory).sort(byName)
 }
 
+// A user-created category (builtin_key NULL).
 // icon (optional): Ionicons name; empty = monogram fallback
 export function createCategory({ name, flow, color, icon }) {
   return getDb().runSync(
@@ -328,7 +403,8 @@ export function createCategory({ name, flow, color, icon }) {
   ).lastInsertRowId
 }
 
-// icon undefined keeps the stored icon; null or '' clears it
+// icon undefined keeps the stored icon; null or '' clears it. builtin_key
+// is kept: the shown name stays translated while `name` is a default one.
 export function updateCategory({ id, name, flow, color, icon }) {
   const sets = ['name=?', 'flow=?', 'color=?']
   const params = [name, flow, color || '#6B7280']
@@ -337,7 +413,7 @@ export function updateCategory({ id, name, flow, color, icon }) {
 }
 
 export function getCategory(id) {
-  return getDb().getFirstSync('SELECT * FROM categories WHERE id=?', [id]) || null
+  return labelCategory(getDb().getFirstSync('SELECT * FROM categories WHERE id=?', [id])) || null
 }
 
 export function deleteCategory(id) {
@@ -482,8 +558,9 @@ export function deleteFeeRule(id) {
   })
 }
 
-// Suggested fee of a rule for a base amount (whole FCFA), or null when the
-// rule does not apply (base above every tier, or invalid input).
+// Suggested fee of a rule for a base amount (whole units of the profile
+// currency), or null when the rule does not apply (base above every tier,
+// or invalid input).
 export function feeFromRule(rule, base) {
   const b = Number(base)
   if (!rule || !Number.isFinite(b) || b <= 0) return null
@@ -563,7 +640,8 @@ export function listTransactions(filters = {}) {
   return getDb().getAllSync(`
     SELECT t.*,
       a.name AS account_name, a.type AS account_type, a.color AS account_color, a.operator_id AS account_operator_id,
-      c.name AS category_name, c.color AS category_color, c.icon AS category_icon
+      c.name AS category_name, c.color AS category_color, c.icon AS category_icon,
+      c.builtin_key AS category_builtin_key
     FROM transactions t
     LEFT JOIN transactions p ON p.id = t.transfer_pair_id
     LEFT JOIN accounts a ON t.account_id = a.id
@@ -571,7 +649,7 @@ export function listTransactions(filters = {}) {
     WHERE ${where.join(' AND ')}
     ORDER BY t.date DESC, t.created_at DESC, t.id DESC
     LIMIT 500
-  `, params)
+  `, params).map(labelTxCategory)
 }
 
 // Transfers counted as ONE operation per day, for the Report's operation
@@ -635,12 +713,12 @@ export function listTransactionsForGraph() {
   return getDb().getAllSync(`
     SELECT t.id, t.account_id, t.date, t.type, t.amount, t.fees, t.description,
            t.transfer_pair_id, t.created_at,
-           c.name AS category_name, c.icon AS category_icon
+           c.name AS category_name, c.icon AS category_icon, c.builtin_key AS category_builtin_key
     FROM transactions t
     LEFT JOIN categories c ON t.category_id = c.id
     WHERE t.forecast_session_id IS NULL
     ORDER BY t.date, t.created_at, t.id
-  `)
+  `).map(labelTxCategory)
 }
 
 // Transaction count per account (quick-filter fan orders accounts by usage)
@@ -666,7 +744,9 @@ export function deleteTransaction(id) {
 /* ------------------------------ Transfers ------------------------------ */
 
 // Account-to-account transfer: a pair of transactions linked through
-// transfer_pair_id (each one points to the other's id).
+// transfer_pair_id (each one points to the other's id). Without a
+// description both legs keep none (the list shows the translated
+// "Transfer"); nothing language-specific is stored.
 export function createTransfer({ from_account_id, to_account_id, amount, fees, date, description }) {
   const d = getDb()
   let result = null
@@ -678,7 +758,7 @@ export function createTransfer({ from_account_id, to_account_id, amount, fees, d
     )
     const r2 = d.runSync(
       "INSERT INTO transactions (account_id,date,type,amount,fees,description) VALUES (?,?,'CREDIT',?,0,?)",
-      [to_account_id, date, amount, description || 'Retrait reçu']
+      [to_account_id, date, amount, description || null]
     )
     d.runSync('UPDATE transactions SET transfer_pair_id=? WHERE id=?', [r2.lastInsertRowId, r1.lastInsertRowId])
     d.runSync('UPDATE transactions SET transfer_pair_id=? WHERE id=?', [r1.lastInsertRowId, r2.lastInsertRowId])
@@ -697,7 +777,7 @@ export function updateTransfer({ debit_tx_id, credit_tx_id, from_account_id, to_
     )
     d.runSync(
       'UPDATE transactions SET account_id=?,date=?,amount=?,fees=0,category_id=?,description=? WHERE id=?',
-      [to_account_id, date, amount, category_id_credit || null, description || 'Retrait reçu', credit_tx_id]
+      [to_account_id, date, amount, category_id_credit || null, description || null, credit_tx_id]
     )
   })
 }
@@ -782,11 +862,11 @@ export function getExpensesByCategory({ account_id, date_from, date_to } = {}) {
 
   const rows = getDb().getAllSync(`
     SELECT c.id AS category_id, c.name AS name, c.color AS color, c.icon AS icon,
-           COALESCE(SUM(x.amount), 0) AS total
+           c.builtin_key AS builtin_key, COALESCE(SUM(x.amount), 0) AS total
     FROM categories c
     LEFT JOIN ${src} x ON ${['x.eff_category_id = c.id', ...cond].join(' AND ')}
     GROUP BY c.id
-  `, params)
+  `, params).map(labelCategory)
 
   const none = getDb().getFirstSync(`
     SELECT SUM(x.amount) AS total
@@ -794,7 +874,7 @@ export function getExpensesByCategory({ account_id, date_from, date_to } = {}) {
     WHERE x.eff_category_id IS NULL
     ${cond.length ? 'AND ' + cond.join(' AND ') : ''}
   `, params)
-  if (none?.total > 0) rows.push({ category_id: null, name: null, color: null, icon: null, total: none.total })
+  if (none?.total > 0) rows.push({ category_id: null, name: null, color: null, icon: null, builtin_key: null, total: none.total })
 
   rows.sort(
     (a, b) => b.total - a.total || String(a.name || '￿').localeCompare(String(b.name || '￿'))
@@ -962,14 +1042,15 @@ export function getForecastSession(id) {
   const transactions = d.getAllSync(`
     SELECT t.*,
       a.name AS account_name, a.type AS account_type, a.color AS account_color, a.operator_id AS account_operator_id,
-      c.name AS category_name, c.color AS category_color, c.icon AS category_icon
+      c.name AS category_name, c.color AS category_color, c.icon AS category_icon,
+      c.builtin_key AS category_builtin_key
     FROM transactions t
     LEFT JOIN transactions p ON p.id = t.transfer_pair_id
     LEFT JOIN accounts a ON t.account_id = a.id
     LEFT JOIN categories c ON c.id = ${EFF_CATEGORY}
     WHERE t.forecast_session_id = ?
     ORDER BY t.date ASC, t.created_at ASC, t.id ASC
-  `, [id])
+  `, [id]).map(labelTxCategory)
 
   return { session, transactions }
 }
@@ -1092,7 +1173,9 @@ function insertRows(d, table, rows) {
 // - no fee_rules → each account with a fees_rate gets its percent rule back;
 // - built-in categories sent WITHOUT an icon field (the snapshot predates
 //   the icon column) get theirs; a category sent with icon null (the user
-//   chose "no icon") is restored as it is.
+//   chose "no icon") is restored as it is;
+// - categories sent WITHOUT a builtin_key field (older app or desktop) get
+//   their built-in key when their name is a default one (names unchanged).
 // A payload without the four v1 tables throws before anything is deleted:
 // Error('Invalid snapshot: nothing restored') with err.code INVALID_SNAPSHOT.
 export function restoreAllData(data) {
@@ -1131,6 +1214,12 @@ export function restoreAllData(data) {
           .map((c) => Number(c.id))
       )
       if (noIconField.size) backfillCategoryIcons(d, noIconField)
+      const noKeyField = new Set(
+        payload.categories
+          .filter((c) => c && typeof c === 'object' && !('builtin_key' in c))
+          .map((c) => Number(c.id))
+      )
+      if (noKeyField.size) backfillBuiltinKeys(d, noKeyField)
     })
   } finally {
     d.execSync('PRAGMA foreign_keys = ON')

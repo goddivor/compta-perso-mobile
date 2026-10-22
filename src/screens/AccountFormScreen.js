@@ -1,8 +1,8 @@
 // Account create/edit. A new account starts with the operator search of the
-// profile country's registry (grouped by type, suggestions, cash, free
-// account); then the form: name, balance and the account's fee rules. No
-// colour picker (first free palette colour), no type picker (the operator or
-// cash decides it). Once the account exists its kind is fixed; an electronic
+// profile country's registry (the most used ones and a way into the search,
+// results grouped by type, cash, free account); then the form: name, balance
+// and the account's fee rules. No colour picker (first free palette colour),
+// no type picker (the operator or cash decides it). Once the account exists its kind is fixed; an electronic
 // account can still link, change or drop its operator.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { View, Text, TextInput, ScrollView, Pressable, BackHandler, StyleSheet } from 'react-native'
@@ -22,11 +22,15 @@ import { Field, Input, Button } from '../components/ui'
 import { nextAccountColor } from '../data/accountColors'
 import { SuffixInput } from '../data/SuffixInput'
 import { operatorTypeLabel, operatorGroupLabel, ruleSummary, RULE_ICON } from '../data/accountLabels'
-import { kindControls, saveBeforeRule, isActiveOperator, suggestionsTitle, balanceToSave } from '../data/accountForm'
+import {
+  kindControls, saveBeforeRule, isActiveOperator, popularTitle, balanceToSave,
+  activeOperatorCount, searchPlaceholder, showSearchAll,
+} from '../data/accountForm'
+import { popularOperators, OPERATOR_TYPE_ORDER } from '../data/popularOperators'
 import { feeRuleLabel } from '../utils/fees'
 import { CURRENCY_LABEL } from '../utils/format'
 
-const TYPE_ORDER = ['mobile_money', 'bank', 'microfinance', 'fintech']
+const TYPE_ORDER = OPERATOR_TYPE_ORDER
 const GROUP_LIMIT = 4
 const SUGGESTION_COUNT = 6
 
@@ -105,6 +109,16 @@ function OperatorSearch({ countryIso2, linkMode, canUnlink, onPickOperator, onPi
   const { data: operators, error, retry } = useOperators(countryIso2)
   const [query, setQuery] = useState('')
   const [expanded, setExpanded] = useState({})
+  const inputRef = useRef(null)
+  const count = activeOperatorCount(operators)
+  // Android does not reopen the keyboard on focus() of an input that kept the
+  // focus after the keyboard was dismissed: blur it first
+  const focusSearch = useCallback(() => {
+    const input = inputRef.current
+    if (!input) return
+    if (input.isFocused()) input.blur()
+    requestAnimationFrame(() => input.focus())
+  }, [])
   const q = query.trim()
   const qw = useMemo(() => queryWords(q), [q])
 
@@ -117,12 +131,7 @@ function OperatorSearch({ countryIso2, linkMode, canUnlink, onPickOperator, onPi
   }, [operators, q])
 
   const suggestions = useMemo(() => {
-    if (!operators) return []
-    const rank = (o) => TYPE_ORDER.indexOf(o.type) * 2 + (o.logo?.svg ? 0 : 1)
-    return operators
-      .filter(isActiveOperator)
-      .sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name))
-      .slice(0, SUGGESTION_COUNT)
+    return popularOperators(operators, SUGGESTION_COUNT)
   }, [operators])
 
   return (
@@ -130,11 +139,13 @@ function OperatorSearch({ countryIso2, linkMode, canUnlink, onPickOperator, onPi
       <View style={[styles.search, { backgroundColor: colors.surface2 }]}>
         <Ionicons name="search" size={20} color={colors.muted} />
         <TextInput
+          ref={inputRef}
           value={query}
           onChangeText={setQuery}
           autoFocus
+          numberOfLines={1}
           autoCorrect={false}
-          placeholder={t('accountForm.searchPlaceholder')}
+          placeholder={searchPlaceholder(t, count)}
           placeholderTextColor={colors.faint}
           style={[styles.searchInput, { color: colors.ink }]}
         />
@@ -155,8 +166,18 @@ function OperatorSearch({ countryIso2, linkMode, canUnlink, onPickOperator, onPi
               </View>
             ) : suggestions.length ? (
               <>
-                <GroupTitle>{suggestionsTitle(t, lang, country)}</GroupTitle>
+                <GroupTitle>{popularTitle(t, lang, country)}</GroupTitle>
                 {suggestions.map((op) => <OperatorRow key={op.id} op={op} qw={qw} onPress={onPickOperator} />)}
+                {showSearchAll(count, suggestions.length) ? (
+                  <Pressable
+                    onPress={focusSearch}
+                    accessibilityRole="button"
+                    style={({ pressed }) => [styles.searchAll, pressed && { backgroundColor: colors.surface2 }]}
+                  >
+                    <View style={styles.searchAllIcon}><Ionicons name="search" size={18} color={colors.link} /></View>
+                    <Text numberOfLines={1} style={[styles.searchAllText, { color: colors.link }]}>{t('accountForm.searchAll', { n: count })}</Text>
+                  </Pressable>
+                ) : null}
               </>
             ) : null}
             {!linkMode ? (
@@ -453,6 +474,9 @@ const styles = StyleSheet.create({
   opName: { fontFamily: fonts.medium, fontSize: 15 },
   opSub: { fontFamily: fonts.regular, fontSize: 12 },
   bold: { fontFamily: fonts.bold },
+  searchAll: { flexDirection: 'row', alignItems: 'center', gap: 14, minHeight: 48, paddingHorizontal: 16 },
+  searchAllIcon: { width: 40, alignItems: 'center' },
+  searchAllText: { flex: 1, fontFamily: fonts.semibold, fontSize: 14 },
   more: { paddingLeft: 70, paddingVertical: 10, paddingRight: 16 },
   offline: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingTop: 16 },
   picked: { flexDirection: 'row', alignItems: 'center', gap: 14 },

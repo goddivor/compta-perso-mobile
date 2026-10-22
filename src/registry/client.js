@@ -6,7 +6,7 @@
 // network) or 'not_found' (HTTP 404); screens translate them.
 import * as FileSystem from 'expo-file-system/legacy'
 
-export const REGISTRY_TAG = 'v1.1.0'
+export const REGISTRY_TAG = 'v1.2.0'
 export const REGISTRY_BASE = `https://cdn.jsdelivr.net/gh/goddivor/compta-perso-registry@${REGISTRY_TAG}/`
 const CACHE_DIR = `${FileSystem.documentDirectory}registry/${REGISTRY_TAG}/`
 const TIMEOUT_MS = 15000
@@ -53,6 +53,25 @@ export function getText(path) {
     p.catch(() => memory.delete(path)) // let a later call retry
   }
   return memory.get(path)
+}
+
+// Raw text of a registry file from memory or the file cache only, never
+// the network: null when it was never downloaded (fast, offline-safe boot).
+export async function getCachedText(path) {
+  if (memory.has(path)) return memory.get(path)
+  const uri = cacheUri(path)
+  const info = await FileSystem.getInfoAsync(uri)
+  return info.exists ? FileSystem.readAsStringAsync(uri) : null
+}
+
+// Parsed JSON of a cached registry file, or null (see getCachedText)
+export async function getCachedJson(path) {
+  if (values.has(path)) return values.get(path)
+  const text = await getCachedText(path)
+  if (text == null) return null
+  const v = JSON.parse(text)
+  values.set(path, v)
+  return v
 }
 
 // Parsed JSON of a registry file (cached parse)
