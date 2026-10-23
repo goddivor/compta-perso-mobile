@@ -154,11 +154,26 @@ async function fetchText(url, label, timeoutMs = FILE_TIMEOUT_MS) {
 // One request per file and ref at a time: a lazy read and a check that
 // want the same file share it (two parallel 500 KB downloads on a slow
 // link made both time out).
+// At most MAX_PARALLEL file requests run at once, the others wait their
+// turn: each timeout starts with its own request, so a screen of logos and
+// a 500 KB operator file no longer starve one another into timeouts.
+const MAX_PARALLEL = 4
+let active = 0
+const waiting = []
+async function limited(work) {
+  if (active >= MAX_PARALLEL) await new Promise((resolve) => waiting.push(resolve))
+  active++
+  try { return await work() } finally {
+    active--
+    const next = waiting.shift()
+    if (next) next()
+  }
+}
 const downloading = new Map() // `${ref}|${path}` → Promise<string>
 function download(path, ref, sha) {
   const key = `${ref}|${path}`
   if (!downloading.has(key)) {
-    const p = whileBusy(() => fetchText(fileUrl(ref, path), path))
+    const p = whileBusy(() => limited(() => fetchText(fileUrl(ref, path), path)))
     downloading.set(key, p)
     p.finally(() => downloading.delete(key)).catch(() => {})
   }
