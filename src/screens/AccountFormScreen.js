@@ -1,6 +1,8 @@
 // Account create/edit. A new account starts with the operator search of the
 // profile country's registry (the most used ones and a way into the search,
-// results grouped by type, cash, free account); then the form: name, balance
+// results grouped by type, then the international services available in
+// the country, cash, free account; a registry update check runs on focus);
+// then the form: name, balance
 // and the account's fee rules. No colour picker (first free palette colour),
 // no type picker (the operator or cash decides it). Once the account exists its kind is fixed; an electronic
 // account can still link, change or drop its operator.
@@ -16,8 +18,12 @@ import { useApp } from '../context/AppContext'
 import { useProfile } from '../hooks/useProfile'
 import { useFocusData } from '../hooks/useFocusData'
 import { useI18n } from '../i18n'
-import { useCountry, useOperator, useOperators, searchOperators, normalizeText, operatorCountry } from '../registry'
+import {
+  useCountry, useOperator, useOperators, useInternational, useRegistryCheck, searchOperators, normalizeText,
+  operatorCountry, isInternationalId,
+} from '../registry'
 import { LogoTile, Chip, EmptyState, ConfirmDialog } from '../components/v2'
+import { RegistryProgress } from '../components/RegistryProgress'
 import { Field, Input, Button } from '../components/ui'
 import { nextAccountColor } from '../data/accountColors'
 import { SuffixInput } from '../data/SuffixInput'
@@ -28,7 +34,8 @@ import {
 } from '../data/accountForm'
 import { popularOperators, OPERATOR_TYPE_ORDER } from '../data/popularOperators'
 import { feeRuleLabel } from '../utils/fees'
-import { CURRENCY_LABEL } from '../utils/format'
+import { fmtParts } from '../utils/format'
+import { useAmountFormat } from '../context/CurrencyContext'
 
 const TYPE_ORDER = OPERATOR_TYPE_ORDER
 const GROUP_LIMIT = 4
@@ -107,10 +114,14 @@ function OperatorSearch({ countryIso2, linkMode, canUnlink, onPickOperator, onPi
   const { t, lang } = useI18n()
   const { data: country } = useCountry(countryIso2)
   const { data: operators, error, retry } = useOperators(countryIso2)
+  const { data: international } = useInternational(countryIso2)
+  useRegistryCheck(countryIso2)
   const [query, setQuery] = useState('')
   const [expanded, setExpanded] = useState({})
   const inputRef = useRef(null)
-  const count = activeOperatorCount(operators)
+  const intl = useMemo(() => (international || []).filter(isActiveOperator), [international])
+  const national = activeOperatorCount(operators)
+  const count = national == null ? null : national + intl.length
   // Android does not reopen the keyboard on focus() of an input that kept the
   // focus after the keyboard was dismissed: blur it first
   const focusSearch = useCallback(() => {
@@ -125,10 +136,20 @@ function OperatorSearch({ countryIso2, linkMode, canUnlink, onPickOperator, onPi
   const groups = useMemo(() => {
     if (!operators || !q) return []
     const hits = searchOperators(operators.filter(isActiveOperator), q, { limit: 1000 })
-    return TYPE_ORDER
-      .map((type) => ({ type, items: hits.filter((o) => o.type === type) }))
+    // a type this version does not know yet goes after the known ones
+    const types = [...TYPE_ORDER, ...new Set(hits.map((o) => o.type).filter((ty) => !TYPE_ORDER.includes(ty)))]
+    return types
+      .map((type) => ({ key: type, title: operatorGroupLabel(t, type), items: hits.filter((o) => o.type === type) }))
       .filter((g) => g.items.length)
-  }, [operators, q])
+  }, [operators, q, t])
+
+  // International services after the country's results, in their own section
+  const intlGroup = useMemo(() => {
+    if (!q || !intl.length) return null
+    const items = searchOperators(intl, q, { limit: 1000 })
+    return items.length ? { key: 'intl', title: t('accounts.group.international'), items } : null
+  }, [intl, q, t])
+  const sections = intlGroup ? [...groups, intlGroup] : groups
 
   const suggestions = useMemo(() => {
     return popularOperators(operators, SUGGESTION_COUNT)
@@ -149,6 +170,7 @@ function OperatorSearch({ countryIso2, linkMode, canUnlink, onPickOperator, onPi
           placeholderTextColor={colors.faint}
           style={[styles.searchInput, { color: colors.ink }]}
         />
+        <RegistryProgress inset={24} />
         {query ? (
           <Pressable onPress={() => setQuery('')} hitSlop={8} accessibilityLabel={t('accountForm.clearSearch')}>
             <Ionicons name="close-circle" size={20} color={colors.muted} />
@@ -194,16 +216,16 @@ function OperatorSearch({ countryIso2, linkMode, canUnlink, onPickOperator, onPi
           </>
         ) : (
           <>
-            {groups.map((g) => {
-              const open = expanded[g.type]
+            {sections.map((g) => {
+              const open = expanded[g.key]
               const shown = open ? g.items : g.items.slice(0, GROUP_LIMIT)
               const rest = g.items.length - shown.length
               return (
-                <View key={g.type}>
-                  <GroupTitle>{operatorGroupLabel(t, g.type)}</GroupTitle>
+                <View key={g.key}>
+                  <GroupTitle>{g.title}</GroupTitle>
                   {shown.map((op) => <OperatorRow key={op.id} op={op} qw={qw} onPress={onPickOperator} />)}
                   {rest > 0 ? (
-                    <Pressable onPress={() => setExpanded((e) => ({ ...e, [g.type]: true }))} style={styles.more}>
+                    <Pressable onPress={() => setExpanded((e) => ({ ...e, [g.key]: true }))} style={styles.more}>
                       <Text style={[styles.opSub, { color: colors.muted }]}>{t('accountForm.more', { n: rest })}</Text>
                     </Pressable>
                   ) : null}
@@ -214,7 +236,7 @@ function OperatorSearch({ countryIso2, linkMode, canUnlink, onPickOperator, onPi
               <View style={{ marginTop: 12 }}>
                 <PlainRow icon="add" color={colors.link} label={t('accountForm.createFree', { name: q })} onPress={() => onPickFree(q)} />
               </View>
-            ) : !groups.length ? (
+            ) : !sections.length ? (
               <EmptyState icon="search-outline" title={t('accountForm.noResult')} />
             ) : null}
           </>
@@ -302,6 +324,9 @@ export default function AccountFormScreen({ navigation, route }) {
   }, [])
 
   const valid = name.trim().length > 0
+  // The currency symbol sits on the side the country writes it ("₦" before, "FCFA" after)
+  const { label: currencyLabel } = useAmountFormat()
+  const symbolLeads = !!fmtParts(0).before
   const balanceNum = balanceToSave(balance, exactBalance)
 
   const provider = account ? account.provider : operator?.name ?? null
@@ -370,8 +395,9 @@ export default function AccountFormScreen({ navigation, route }) {
     )
   }
 
+  const where = isInternationalId(operator?.id) ? t('accounts.group.international') : country ? country.name[lang] || country.name.en : ''
   const kind = operator
-    ? `${operatorTypeLabel(t, operator.type)}${country ? ` · ${country.name[lang] || country.name.en}` : ''}`
+    ? `${operatorTypeLabel(t, operator.type)}${where ? ` · ${where}` : ''}`
     : type === 'PHYSICAL' ? t('common.cash') : t('accountForm.noOperator')
 
   return (
@@ -408,7 +434,8 @@ export default function AccountFormScreen({ navigation, route }) {
             value={balance}
             onChangeText={(v) => { setExactBalance(null); setBalance(v.replace(',', '.')) }}
             placeholder="0"
-            suffix={CURRENCY_LABEL}
+            prefix={symbolLeads ? currencyLabel : undefined}
+            suffix={symbolLeads ? undefined : currencyLabel}
           />
         </Field>
 
