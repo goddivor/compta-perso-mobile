@@ -7,6 +7,7 @@
 // Onboarding gate: while the profile has no currency, the Onboarding route
 // opens on top of the tabs at launch (owner's upgraded data included); the
 // update sheet and the Drive auto-backup wait until the profile is complete.
+// Registry: checked for an update at start-up when the last check is > 24 h old.
 import { useEffect, useState } from 'react'
 import { View, Text, ActivityIndicator, useColorScheme } from 'react-native'
 import { StatusBar } from 'expo-status-bar'
@@ -27,11 +28,12 @@ import {
 import { ThemeProvider, useTheme, fonts, palettes } from './src/theme/tokens'
 import { I18nProvider, useT, t } from './src/i18n'
 import { getDb, getProfile, listAccounts } from './src/db/database'
-import { AppProvider } from './src/context/AppContext'
+import { AppProvider, useRefresh } from './src/context/AppContext'
 import { FiltersProvider } from './src/context/FiltersContext'
 import { PrivacyProvider } from './src/context/PrivacyContext'
 import { CurrencyProvider, resolveProfileCurrencyLabel } from './src/context/CurrencyContext'
 import { setCurrencyLabel } from './src/utils/format'
+import { checkRegistry, subscribeRegistry, STARTUP_INTERVAL_MS } from './src/registry'
 import FilterScreen from './src/screens/FilterScreen'
 import HomeScreen from './src/screens/HomeScreen'
 import TransactionsScreen from './src/screens/TransactionsScreen'
@@ -163,6 +165,24 @@ function Root() {
     }, 3000)
     return () => { alive = false; clearTimeout(timer) }
   }, [profileReady])
+
+  // A registry update of countries or currencies re-reads the amount format
+  // (CurrencyProvider follows the data tick)
+  const refresh = useRefresh()
+  useEffect(() => subscribeRegistry((paths) => {
+    if (paths.includes('data/countries.json') || paths.includes('data/currencies.json')) refresh()
+  }), [refresh])
+
+  // Registry update check at start-up when the last one is older than 24 h
+  // (background, silent; operator screens also check on focus)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      let iso2 = null
+      try { iso2 = getProfile().country_iso2 || null } catch { iso2 = null }
+      checkRegistry({ iso2, minInterval: STARTUP_INTERVAL_MS })
+    }, 2000)
+    return () => clearTimeout(timer)
+  }, [])
 
   // Silent Google Drive auto-backup, deferred so it never slows startup:
   // runs only when an account is connected AND the chosen frequency is due

@@ -4,8 +4,10 @@
 //
 // The set is split so mobile money (what most users hold) is never pushed
 // out by banks: up to half (3 of 6) mobile money, the rest from the other
-// types (banks first, then fintech, then microfinance); a group with fewer
-// operators leaves its slots to the other. Mobile money is shown first.
+// types (bank, digital bank, wallet, microfinance, money transfer,
+// investment, in that order); a group with fewer operators leaves its slots
+// to the other. Mobile money is shown first. Merchant-only gateways
+// (`consumer: false`) and international services never appear here.
 // Inside a group, registry v1.2.0's `presence` (number of countries where
 // the brand exists, >= 1) orders it: presence (high first), then operators
 // with a logo, then name. A registry file without the field (older cached
@@ -15,9 +17,11 @@
 
 import { isActiveOperator } from './accountForm'
 
-export const OPERATOR_TYPE_ORDER = ['mobile_money', 'bank', 'microfinance', 'fintech']
-// order of the non mobile money group
-const OTHER_ORDER = ['bank', 'fintech', 'microfinance']
+// order of the non mobile money group (registry v2 types; 'fintech' only in
+// a legacy v1 cache)
+const OTHER_ORDER = ['bank', 'digital_bank', 'wallet', 'microfinance', 'money_transfer', 'investment', 'fintech']
+// order of the type groups in search results
+export const OPERATOR_TYPE_ORDER = ['mobile_money', ...OTHER_ORDER]
 
 const otherRank = (o) => {
   const i = OTHER_ORDER.indexOf(o.type)

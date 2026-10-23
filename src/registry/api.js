@@ -1,10 +1,19 @@
 // Registry getters (countries, currencies, operators, SVG art).
 // Data shapes: registry/SCHEMA.md (countries[], currencies[], operators[]).
 // Every getter is async: memory, then file cache, then network.
-import { getText, getJson, getCachedJson, peek, remember, REGISTRY_TAG, REGISTRY_BASE } from './client'
+// Live updates: checkRegistry (client.js) swaps changed files in; the
+// operator index below follows.
+import {
+  getText, getJson, getCachedJson, getLogoText, peek, remember, subscribeRegistry,
+  REGISTRY_TAG, REGISTRY_BASE,
+} from './client'
 import { logoLayout } from './logo'
 
 export { REGISTRY_TAG, REGISTRY_BASE, logoLayout }
+export {
+  checkRegistry, subscribeRegistry, getRegistryRevision, isRegistryBusy, subscribeRegistryBusy,
+  CHECK_INTERVAL_MS, STARTUP_INTERVAL_MS,
+} from './client'
 
 // All 54 countries: [{ iso2, name: { fr, en }, flag: { svgSquare… }, currencies: ['XOF'] }]
 export const getCountries = async () => (await getJson('data/countries.json')).countries
@@ -49,25 +58,60 @@ export async function currencyLabel(code, iso2, { cacheOnly = false } = {}) {
 }
 
 const operatorsPath = (iso2) => `data/operators/${String(iso2).toUpperCase()}.json`
+const INTERNATIONAL = 'data/international.json'
+const INTL = 'intl-'
 
-// Operators of one country: [{ id, name, aliases, type, group, status, presence, logo: { svg, background } | null }]
-// presence (registry v1.2.0): number of countries where the brand exists, >= 1
+// Index operators by id for getOperator / peekOperator
+const index = (operators) => { for (const op of operators || []) remember(`op:${op.id}`, op) }
+
+// A file swapped in by a registry check re-indexes its operators
+subscribeRegistry((paths) => {
+  for (const p of paths) if (p.startsWith('data/operators/') || p === INTERNATIONAL) index(peek(p)?.operators)
+})
+
+// Operators of one country: [{ id, name, aliases, type, group, status, presence, consumer?, logo: { svg, background, sha256 } | null }]
+// type (registry v2): bank | microfinance | mobile_money | digital_bank | wallet | money_transfer | investment
+// ('fintech' in a legacy v1 cache). presence: countries where the brand exists, >= 1.
+// consumer: false = merchant-only gateway, hidden from search (still resolves by id)
 export async function getOperators(iso2) {
   const file = await getJson(operatorsPath(iso2))
-  // index by id for getOperator / peekOperator
-  for (const op of file.operators) remember(`op:${op.id}`, op)
+  index(file.operators)
   return file.operators
 }
 
-// Country code of an operator id ('tg-mixx-by-yas' → 'TG')
-export const operatorCountry = (id) => (id ? String(id).slice(0, 2).toUpperCase() : null)
+// International services (registry v2): operators with an `intl-` id and
+// `availability` { mode: 'all' | 'only' | 'except', countries: [ISO2] }
+export async function getInternational() {
+  const file = await getJson(INTERNATIONAL)
+  index(file.operators)
+  return file.operators
+}
 
-// One operator by id, or null (loads its country file)
+// Whether an international service is available in a country
+export function availableIn(op, iso2) {
+  const a = op?.availability
+  if (!a || !iso2) return false
+  const listed = (a.countries || []).includes(String(iso2).toUpperCase())
+  return a.mode === 'all' || (a.mode === 'only' && listed) || (a.mode === 'except' && !listed)
+}
+
+// International services available in a country
+export const getInternationalFor = async (iso2) => (await getInternational()).filter((op) => availableIn(op, iso2))
+
+// Whether an operator id is an international service ('intl-paypal')
+export const isInternationalId = (id) => !!id && String(id).startsWith(INTL)
+
+// Country code of an operator id ('tg-mixx-by-yas' → 'TG'); null for an
+// international service
+export const operatorCountry = (id) => (id && !isInternationalId(id) ? String(id).slice(0, 2).toUpperCase() : null)
+
+// One operator by id, or null (loads its country file, or international.json)
 export async function getOperator(id) {
   if (!id) return null
   if (peek(`op:${id}`)) return peek(`op:${id}`)
   try {
-    await getOperators(operatorCountry(id))
+    if (isInternationalId(id)) await getInternational()
+    else await getOperators(operatorCountry(id))
   } catch (e) {
     if (e.code === 'not_found') return null
     throw e
@@ -75,19 +119,23 @@ export async function getOperator(id) {
   return peek(`op:${id}`) || null
 }
 
-// The operator if its country file is already loaded (sync), else undefined
+// The operator if its file is already loaded (sync), else undefined
 export const peekOperator = (id) => (id ? peek(`op:${id}`) : undefined)
 
-// SVG source of a registry path ('svg/flags/1x1/tg.svg', operator.logo.svg, currency.sign.svg)
+// SVG source of a registry path ('svg/flags/1x1/tg.svg', currency.sign.svg)
 export const getSvg = (path) => getText(path)
 
+// Memory key of an operator's logo: its sha256 (v2), else its path (legacy)
+const logoKey = (logo) => `logo:${logo.sha256 || logo.svg}`
+
 // Logo of an operator → { xml, layout: { mode, bg }, background: 'dark'|'light'|null } or null
+// The SVG is cached by its sha256: a new sha downloads the new logo.
 export async function getLogo(operatorId) {
   const op = await getOperator(operatorId)
   if (!op?.logo?.svg) return null
-  const key = `logo:${op.logo.svg}`
+  const key = logoKey(op.logo)
   if (!peek(key)) {
-    const xml = await getSvg(op.logo.svg)
+    const xml = await getLogoText(op.logo.svg, op.logo.sha256)
     remember(key, { xml, layout: logoLayout(xml), background: op.logo.background ?? null })
   }
   return peek(key)
@@ -96,5 +144,5 @@ export async function getLogo(operatorId) {
 // The logo if already loaded (sync), else undefined
 export const peekLogo = (operatorId) => {
   const op = peekOperator(operatorId)
-  return op?.logo?.svg ? peek(`logo:${op.logo.svg}`) : op ? null : undefined
+  return op?.logo?.svg ? peek(logoKey(op.logo)) : op ? null : undefined
 }

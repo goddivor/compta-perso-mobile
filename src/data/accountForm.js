@@ -25,8 +25,10 @@ export function balanceToSave(text, exact) {
   return Math.round(parseFloat(String(text).replace(/\s/g, '').replace(',', '.')) || 0)
 }
 
-// Only active operators can be picked (rebranded, merged, defunct cannot)
-export const isActiveOperator = (op) => (op.status || 'active') === 'active'
+// Only active consumer operators can be picked: not rebranded, merged or
+// defunct, and not a merchant-only gateway (`consumer: false`, registry v2).
+// An account already linked to one still shows it (lookups go by id).
+export const isActiveOperator = (op) => (op.status || 'active') === 'active' && op.consumer !== false
 
 // French preposition before each registry country: au Togo, en Côte d'Ivoire,
 // aux Comores, à Madagascar. A country missing here gets a neutral title.

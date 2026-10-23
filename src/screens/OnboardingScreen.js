@@ -14,8 +14,11 @@ import { useI18n } from '../i18n'
 import { listAccounts, setProfile } from '../db/database'
 import { useRefresh } from '../context/AppContext'
 import { EmptyState, Flag, CurrencySign, LogoTile } from '../components/v2'
-import { useCountries, useCurrencies, useOperators, searchCountries, searchOperators, normalizeText } from '../registry'
-import { activeOperatorCount, searchPlaceholder, showSearchAll } from '../data/accountForm'
+import {
+  useCountries, useCurrencies, useOperators, useInternational, useRegistryCheck, searchCountries, searchOperators, normalizeText,
+} from '../registry'
+import { RegistryProgress } from '../components/RegistryProgress'
+import { activeOperatorCount, searchPlaceholder, showSearchAll, isActiveOperator } from '../data/accountForm'
 import { popularOperators } from '../data/popularOperators'
 import { capitalizeFirst } from '../utils/format'
 
@@ -163,15 +166,27 @@ export default function OnboardingScreen({ navigation, route }) {
   }
 
   /* --------------------------- step 3: first account ---------------------- */
-  const operators = useOperators(withAccountStep && step === 2 && !isoMode ? iso2 : null)
+  const accountStep = withAccountStep && step === 2 && !isoMode
+  const operators = useOperators(accountStep ? iso2 : null)
+  const international = useInternational(accountStep ? iso2 : null)
+  // registry update check on focus of this step (background, silent)
+  useRegistryCheck(iso2, accountStep && !!iso2)
   const { width } = useWindowDimensions()
   const tileW = Math.floor((width - 32 - 20) / 3)
-  const opCount = activeOperatorCount(operators.data)
+  const intlActive = useMemo(() => (international.data || []).filter(isActiveOperator), [international.data])
+  const nationalCount = activeOperatorCount(operators.data)
+  const opCount = nationalCount == null ? null : nationalCount + intlActive.length
   const opList = useMemo(() => {
-    const active = (operators.data || []).filter((o) => (o.status || 'active') === 'active')
+    const active = (operators.data || []).filter(isActiveOperator)
     if (query.trim()) return searchOperators(active, query, { limit: 12 })
     return popularOperators(operators.data, DEFAULT_OPERATORS, { logoOnly: true })
   }, [operators.data, query])
+  // International services matching the search, in their own section (the
+  // popular tiles stay national)
+  const intlList = useMemo(
+    () => (query.trim() ? searchOperators(intlActive, query, { limit: 12 }) : []),
+    [intlActive, query],
+  )
 
   // "Not listed? Search all N" focuses the search field. Android does not
   // reopen the keyboard on focus() of an input that kept the focus after the
@@ -185,6 +200,17 @@ export default function OnboardingScreen({ navigation, route }) {
   }, [])
 
   const openAccount = (params) => toTabs({ name: 'AccountForm', params })
+  const opTile = (o) => (
+    <Pressable
+      key={o.id}
+      onPress={() => openAccount({ type: 'ELECTRONIC', operatorId: o.id, name: o.name })}
+      accessibilityRole="button"
+      style={[styles.op, { width: tileW, backgroundColor: colors.surface }]}
+    >
+      <LogoTile operatorId={o.id} name={o.name} size={48} />
+      <Text style={[styles.opName, { color: colors.ink }]} numberOfLines={2}>{o.name}</Text>
+    </Pressable>
+  )
 
   // The operators of the profile country are still loading (also true on the
   // first render of the step, before the hook's effect flags it as loading):
@@ -245,6 +271,7 @@ export default function OnboardingScreen({ navigation, route }) {
             autoCorrect={false}
             style={[styles.searchInput, { color: colors.ink }]}
           />
+          {step === 2 ? <RegistryProgress inset={26} /> : null}
           {query ? (
             <Pressable onPress={() => setQuery('')} accessibilityRole="button" accessibilityLabel={t('onboarding.clear')} hitSlop={8}>
               <Ionicons name="close-circle" size={20} color={colors.muted} />
@@ -328,20 +355,16 @@ export default function OnboardingScreen({ navigation, route }) {
                   </View>
                 ))}
               </View>
-            ) : opList.length ? (
-              <View style={styles.grid}>
-                {opList.map((o) => (
-                  <Pressable
-                    key={o.id}
-                    onPress={() => openAccount({ type: 'ELECTRONIC', operatorId: o.id, name: o.name })}
-                    accessibilityRole="button"
-                    style={[styles.op, { width: tileW, backgroundColor: colors.surface }]}
-                  >
-                    <LogoTile operatorId={o.id} name={o.name} size={48} />
-                    <Text style={[styles.opName, { color: colors.ink }]} numberOfLines={2}>{o.name}</Text>
-                  </Pressable>
-                ))}
-              </View>
+            ) : opList.length || intlList.length ? (
+              <>
+                {opList.length ? <View style={styles.grid}>{opList.map(opTile)}</View> : null}
+                {intlList.length ? (
+                  <>
+                    <Text style={[styles.grp, { color: colors.muted }]}>{t('accounts.group.international')}</Text>
+                    <View style={styles.grid}>{intlList.map(opTile)}</View>
+                  </>
+                ) : null}
+              </>
             ) : query.trim() ? (
               <Text style={[styles.empty, { color: colors.muted }]}>{t('onboarding.noResult')}</Text>
             ) : null}
