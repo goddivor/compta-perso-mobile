@@ -10,7 +10,7 @@ Text comes from `common.*` keys only, so screen units never need these files.
 | `EmptyState` | `icon`, `title`, `action?: { label, onPress, icon?, variant?: 'primary' \| 'tonal', busy? }`, `style` | Centred in the free space, above the keyboard. `action.busy`: spinner in place of the icon, button disabled. In a FlatList: `ListEmptyComponent` + `contentContainerStyle={{ flexGrow: 1 }}`. |
 | `LogoTile` | `operatorId`, `name`, `color`, `icon`, `size = 40`, `style` | Registry logo on the white tile (fills it when drawn on its own coloured block). No logo: `icon` (e.g. `'cash-outline'` for a PHYSICAL account) or the initial of `name`, in `color`. |
 | `CategoryIcon` | `icon`, `name`, `color`, `size = 40`, `transfer = false`, `style` | Circle, Ionicons `icon` or the initial of `name`. `transfer` = blue swap avatar. |
-| `Amount` | `value`, `type?: 'DEBIT' \| 'CREDIT'`, `size = 15`, `weight = 'semibold'`, `currency = true`, `color`, `style`, `numberOfLines = 1` | Debit red "−", credit green "+", no type = balance in ink. Suffix = the profile currency label (`useCurrencyLabel()`, none before onboarding). Masked when the user hides amounts. |
+| `Amount` | `value`, `type?: 'DEBIT' \| 'CREDIT'`, `size = 15`, `weight = 'semibold'`, `currency = true`, `color`, `style`, `numberOfLines = 1` | Debit red "−", credit green "+", no type = balance in ink. Currency symbol on the side and with the spacing of the profile country's amount format (`fmtParts`), none before onboarding. Masked when the user hides amounts. |
 | `Chip` | `label`, `selected`, `onPress`, `leading`, `style` | 32 dp. Selected = yellow tint + check. Periods, fee suggestions. |
 | `TriChip` | `label`, `state: 'neutral' \| 'include' \| 'exclude'`, `onPress`, `leading`, `style` | Account and category filters; the parent cycles the state. |
 | `Select` | `label`, `value`, `options: [{ value, label, leading? }]`, `onChange(value)`, `placeholder`, `placeholderLeading`, `disabled`, `style` | Field + menu anchored under it (above when no room). |
@@ -32,5 +32,5 @@ Text comes from `common.*` keys only, so screen units never need these files.
   `computeFee`, `feeSuggestions`, `feeRuleLabel`; `utils/format` `fmtParts`, `CURRENCY_LABEL` (live); `utils/filters`;
   `utils/color` `withAlpha` (user colours only).
 - **Contexts**: `useFilters()` (see `context/FiltersContext.js`), `usePrivacy()` (hide amounts),
-  `useCurrencyLabel()` (profile currency label, `context/CurrencyContext.js`).
+  `useCurrencyLabel()` (profile currency label) and `useAmountFormat()` (`context/CurrencyContext.js`).
 - **Hooks**: `useProfile()`, `useKeyboardHeight()`.
