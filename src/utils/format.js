@@ -1,37 +1,170 @@
 // Currency and date formatting helpers. The active locale follows the app
-// language (set by the I18nProvider via setFormatLocale); default en-US.
-// The currency label is the profile currency's symbol, set at start and on
-// every profile change by the CurrencyProvider (context/CurrencyContext.js)
-// through setCurrencyLabel: the registry's local symbol ('R', '₦', 'F CFA'),
-// or the ISO code while the registry is not cached. Empty before onboarding.
+// language (set by the I18nProvider via setFormatLocale); default en-US. It
+// drives dates, and amounts only while the profile country has no amount
+// format.
+//
+// Amounts follow the profile country's registry amountFormat (registry v2,
+// countries[].amountFormat): symbol before or after the number, the exact
+// spaces of the data (U+00A0 / U+202F kept), the group separator. Set by the
+// CurrencyProvider (context/CurrencyContext.js) at start and on every change:
+//   setAmountFormat(format)  the country's { pattern, signPattern,
+//                            alphaPattern, group, decimal, localSymbol } or null
+//   setCurrencyLabel(label)  the symbol shown: the registry symbol of the
+//                            profile currency ('FCFA', '₦', 'R'), or its ISO
+//                            code while the registry is not cached; '' before
+//                            onboarding (bare numbers)
+// Pattern choice (registry SCHEMA "Amount format"): `pattern` when the symbol
+// is the country's own (localSymbols[country] of its main currency); else
+// `signPattern` when the symbol's character next to the number is a Unicode
+// symbol (₦, $, ₵), `alphaPattern` for a letter (Ksh, KES).
+// Without a country format (registry v1 cache, no country): the app locale's
+// separators and "2 000 SYMBOL", as before.
+// Amounts are whole: the ledger stores whole amounts, every figure is rounded.
+// Sign convention: the minus (U+2212) or plus goes before the whole amount,
+// symbol included, as CLDR does: −₦2,000, −R2 000, −2 000 FCFA.
 
 let locale = 'en-US'
-export const setFormatLocale = (l) => { locale = l || 'en-US' }
+export const setFormatLocale = (l) => {
+  const next = l || 'en-US'
+  if (next === locale) return
+  locale = next
+  compile()
+}
 export const getFormatLocale = () => locale
+
+const MINUS = '\u2212'
+const NUMBER = '#,##0'
+const PLACEHOLDER = '\u00a4' // ¤
+// Invisible characters the data may carry (zero-width, bidi marks, BOM):
+// dropped, never injected
+const INVISIBLE = /[\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/g
+export const stripInvisible = (s) => String(s ?? '').replace(INVISIBLE, '')
+
+// A Unicode symbol character (\p{S}); fallback list where the engine lacks
+// property escapes
+const SYMBOL_CHAR = (() => {
+  try { return new RegExp('^\\p{S}$', 'u') } catch (e) {
+    return /^[$+<=>^`|~\u00a2-\u00a9\u00ac\u00ae-\u00b1\u00b4\u00b8\u00d7\u00f7\u058f\u060b\u20a0-\u20cf\ufdfc]$/
+  }
+})()
 
 // Live binding: modules importing CURRENCY_LABEL read the current value at
 // use time (ES module semantics, kept by Metro's CommonJS transform).
 export let CURRENCY_LABEL = ''
-export const setCurrencyLabel = (label) => { CURRENCY_LABEL = label ? String(label) : '' }
+let countryFormat = null
+// Compiled form: { before, after, group } (group null → app locale's Intl)
+let shape = { before: '', after: '', group: null, decimal: null }
+
+const validPattern = (p) => typeof p === 'string' && p.includes(NUMBER) && p.includes(PLACEHOLDER)
+
+// A registry amountFormat (+ localSymbol) cleaned, or null when unusable
+export function normalizeAmountFormat(f) {
+  if (!f || typeof f !== 'object') return null
+  const pattern = stripInvisible(f.pattern)
+  if (!validPattern(pattern)) return null
+  const pick = (p) => (validPattern(stripInvisible(p)) ? stripInvisible(p) : pattern)
+  return {
+    pattern,
+    signPattern: pick(f.signPattern),
+    alphaPattern: pick(f.alphaPattern),
+    group: typeof f.group === 'string' ? f.group : ',',
+    decimal: typeof f.decimal === 'string' && f.decimal ? f.decimal : '.',
+    localSymbol: f.localSymbol ? stripInvisible(f.localSymbol) : null,
+  }
+}
+
+function compile() {
+  const symbol = CURRENCY_LABEL
+  const f = countryFormat
+  if (!f) {
+    shape = { before: '', after: symbol ? ' ' + symbol : '', group: null, decimal: null }
+    return
+  }
+  let pattern = f.pattern
+  if (symbol && symbol !== f.localSymbol) {
+    const leading = f.signPattern.indexOf(PLACEHOLDER) < f.signPattern.indexOf(NUMBER)
+    const chars = Array.from(symbol)
+    const near = leading ? chars[chars.length - 1] : chars[0]
+    pattern = SYMBOL_CHAR.test(near) ? f.signPattern : f.alphaPattern
+  }
+  const at = pattern.indexOf(NUMBER)
+  let before = pattern.slice(0, at)
+  let after = pattern.slice(at + NUMBER.length)
+  if (symbol) {
+    before = before.split(PLACEHOLDER).join(symbol)
+    after = after.split(PLACEHOLDER).join(symbol)
+  } else {
+    // No currency yet: the bare number, without the symbol's spacing
+    before = ''
+    after = ''
+  }
+  shape = { before, after, group: f.group, decimal: f.decimal }
+}
+
+export const setCurrencyLabel = (label) => {
+  const next = label ? stripInvisible(String(label)) : ''
+  if (next === CURRENCY_LABEL) return
+  CURRENCY_LABEL = next
+  compile()
+}
 export const getCurrencyLabel = () => CURRENCY_LABEL
 
-export const fmtNumber = (n) =>
-  new Intl.NumberFormat(locale).format(Math.round(n || 0))
+// format: a registry amountFormat with its localSymbol (normalized here), or null
+export const setAmountFormat = (format) => {
+  const next = normalizeAmountFormat(format)
+  if (JSON.stringify(next) === JSON.stringify(countryFormat)) return
+  countryFormat = next
+  compile()
+}
+export const getAmountFormat = () => countryFormat
 
-// "12 500 R", or the bare number while no currency is known
-export const fmt = (n) => (CURRENCY_LABEL ? fmtNumber(n) + ' ' + CURRENCY_LABEL : fmtNumber(n))
+// Digits of a whole, non-negative amount with the active group separator
+function groupDigits(abs) {
+  if (shape.group == null) return new Intl.NumberFormat(locale).format(abs)
+  return String(abs).replace(/\B(?=(\d{3})+(?!\d))/g, shape.group)
+}
 
-export const fmtSigned = (type, n) =>
-  (type === 'CREDIT' ? '+' : '-') + fmt(n)
+const whole = (n) => Math.round(Number(n) || 0)
 
-// v2 split form of fmt() for styled amounts (number and a quieter currency
-// suffix): { sign, number, currency }. sign is '+' (CREDIT), '−' (U+2212,
-// DEBIT or a negative balance) or ''. fmt(n) === number + ' ' + currency
-// (currency '' → fmt(n) === number).
+// The grouped number alone ("2 000", "2,000"), "−" when negative
+export const fmtNumber = (n) => {
+  const v = whole(n)
+  return (v < 0 ? MINUS : '') + groupDigits(Math.abs(v))
+}
+
+// Split form of an amount for styled rendering:
+//   { sign, before, number, after, currency }
+// sign is '+' (CREDIT), '−' (U+2212, DEBIT or a negative balance) or '';
+// before / after carry the symbol with its spacing on its side of the number
+// ('' on the other side); currency is the bare symbol (CURRENCY_LABEL).
+// sign + before + number + after === fmt(n) (no type) or fmtSigned(type, n).
 export const fmtParts = (n, type = null) => {
-  const v = Math.round(n || 0)
-  const sign = type === 'CREDIT' ? '+' : type === 'DEBIT' || (!type && v < 0) ? '\u2212' : ''
-  return { sign, number: fmtNumber(Math.abs(v)), currency: CURRENCY_LABEL }
+  const v = whole(n)
+  const sign = type === 'CREDIT' ? '+' : type === 'DEBIT' || (!type && v < 0) ? MINUS : ''
+  return { sign, before: shape.before, number: groupDigits(Math.abs(v)), after: shape.after, currency: CURRENCY_LABEL }
+}
+
+const join = (p) => p.sign + p.before + p.number + p.after
+
+// "2 000 FCFA", "₦2,000", "R2 000"; the bare number while no currency is known
+export const fmt = (n) => join(fmtParts(n))
+
+// "+₦2,000" (CREDIT) or "−₦2,000" (anything else); the amount's own sign is ignored
+export const fmtSigned = (type, n) => join(fmtParts(n, type === 'CREDIT' ? 'CREDIT' : 'DEBIT'))
+
+// Compact figure for chart axes: 950, 12k, 1,5M (country's decimal mark)
+export const fmtCompact = (n) => {
+  const v = Number(n) || 0
+  const abs = Math.abs(v)
+  if (abs >= 1e6) {
+    if (shape.decimal == null) return new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(v / 1e6) + 'M'
+    // A currency's own decimal mark (Cape Verde's '$') stays out of axes
+    const mark = /^[.,]$/.test(shape.decimal) ? shape.decimal : shape.group === '.' ? ',' : '.'
+    const r = Math.round(abs / 1e5) / 10
+    return (v < 0 ? '-' : '') + String(r).replace('.', mark) + 'M'
+  }
+  if (abs >= 1e3) return Math.round(v / 1e3) + 'k'
+  return String(Math.round(v))
 }
 
 // First letter upper-cased in the app locale: CLDR names some currencies in
