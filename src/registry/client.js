@@ -386,7 +386,7 @@ export function checkRegistry({ iso2, minInterval = CHECK_INTERVAL_MS } = {}) {
     const meta = await loadMeta()
     const now = Date.now()
     if (now - (meta.lastCheck || 0) < minInterval || now - lastFailAt < RETRY_AFTER_FAIL_MS) return []
-    return runCheck(iso2)
+    return whileBusy(() => runCheck(iso2)) // one progress line for the whole check
   })()
     .catch((e) => {
       lastFailAt = Date.now()
