@@ -45,8 +45,12 @@ const ROOT = `${FileSystem.documentDirectory}registry/`
 const CACHE_DIR = `${ROOT}cache/`
 const LOGO_DIR = `${ROOT}logos/`
 const LEGACY_DIR = `${ROOT}v1.2.0/`
+const OLDER_DIRS = [`${ROOT}v1.0.0/`, `${ROOT}v1.1.0/`] // caches of app 2.0.0 and 2.0.1, never read
 const META_URI = `${ROOT}meta.json`
-const TIMEOUT_MS = 15000
+// Whole-transfer timeouts (fetch has no progress event): the manifest is
+// tiny; an operator file reaches 500 KB, on a cold CDN edge and a slow link
+const MANIFEST_TIMEOUT_MS = 15000
+const FILE_TIMEOUT_MS = 60000
 const RETRY_AFTER_FAIL_MS = 60 * 1000
 export const CHECK_INTERVAL_MS = 15 * 60 * 1000 // focus of an operator screen
 export const STARTUP_INTERVAL_MS = 24 * 60 * 60 * 1000 // app start
@@ -69,9 +73,10 @@ const fail = (code, message) => Object.assign(new Error(message), { code })
 
 const listeners = new Set()
 let revision = 0
-// fn(paths) after files were swapped in by a check; returns the unsubscribe
+// fn(paths) after each check that reached the manifest, with the paths it
+// swapped in ([] when none); returns the unsubscribe
 export function subscribeRegistry(fn) { listeners.add(fn); return () => listeners.delete(fn) }
-// Increases on every swap (React hooks re-read on a change)
+// Increases after each such check (React hooks re-read)
 export const getRegistryRevision = () => revision
 function emit(paths) {
   revision++
@@ -106,22 +111,32 @@ async function readFile(uri) {
   }
 }
 
-// Temporary file, then a rename over the target (atomic on Android)
-async function writeAtomic(dir, uri, text) {
-  await FileSystem.makeDirectoryAsync(dir, { intermediates: true }).catch(() => {})
-  const tmp = `${uri}.tmp`
-  await FileSystem.writeAsStringAsync(tmp, text)
-  try {
-    await FileSystem.moveAsync({ from: tmp, to: uri })
-  } catch {
-    await FileSystem.deleteAsync(uri, { idempotent: true })
-    await FileSystem.moveAsync({ from: tmp, to: uri })
+// Temporary file (unique name: two writers of one file never share it),
+// then a rename over the target (atomic on Android). Writes to one target
+// run one after the other.
+let tmpSeq = 0
+const writing = new Map() // uri → Promise of the last write
+function writeAtomic(dir, uri, text) {
+  const run = async () => {
+    await FileSystem.makeDirectoryAsync(dir, { intermediates: true }).catch(() => {})
+    const tmp = `${uri}.${Date.now()}-${++tmpSeq}.tmp`
+    await FileSystem.writeAsStringAsync(tmp, text)
+    try {
+      await FileSystem.moveAsync({ from: tmp, to: uri })
+    } catch {
+      await FileSystem.deleteAsync(uri, { idempotent: true })
+      await FileSystem.moveAsync({ from: tmp, to: uri })
+    }
   }
+  const p = (writing.get(uri) || Promise.resolve()).catch(() => {}).then(run)
+  writing.set(uri, p)
+  p.finally(() => { if (writing.get(uri) === p) writing.delete(uri) }).catch(() => {})
+  return p
 }
 
-async function fetchText(url, label) {
+async function fetchText(url, label, timeoutMs = FILE_TIMEOUT_MS) {
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
     const res = await fetch(url, { signal: controller.signal })
     if (res.status === 404) throw fail('not_found', `registry: ${label} not found`)
@@ -135,12 +150,23 @@ async function fetchText(url, label) {
   }
 }
 
-// A registry file at a ref, checked against its sha256 when one is known
-async function download(path, ref, sha) {
-  const text = await whileBusy(() => fetchText(fileUrl(ref, path), path))
-  if (sha && sha256(text) !== sha) throw fail('offline', `registry: ${path} does not match its sha256`)
-  if (isData(path)) JSON.parse(text) // a truncated file never reaches the cache
-  return text
+// A registry file at a ref, checked against its sha256 when one is known.
+// One request per file and ref at a time: a lazy read and a check that
+// want the same file share it (two parallel 500 KB downloads on a slow
+// link made both time out).
+const downloading = new Map() // `${ref}|${path}` → Promise<string>
+function download(path, ref, sha) {
+  const key = `${ref}|${path}`
+  if (!downloading.has(key)) {
+    const p = whileBusy(() => fetchText(fileUrl(ref, path), path))
+    downloading.set(key, p)
+    p.finally(() => downloading.delete(key)).catch(() => {})
+  }
+  return downloading.get(key).then((text) => {
+    if (sha && sha256(text) !== sha) throw fail('offline', `registry: ${path} does not match its sha256`)
+    if (isData(path)) JSON.parse(text) // a truncated file never reaches the cache
+    return text
+  })
 }
 
 /* ---------------------------------- meta ---------------------------------- */
@@ -165,7 +191,7 @@ async function saveMeta(meta) {
 
 // The latest manifest, or { unsupported: true } for a schema above ours
 async function fetchManifest() {
-  const m = JSON.parse(await whileBusy(() => fetchText(MANIFEST_URL, 'index.json')))
+  const m = JSON.parse(await whileBusy(() => fetchText(MANIFEST_URL, 'index.json', MANIFEST_TIMEOUT_MS)))
   if (!m || typeof m.schema !== 'number') throw fail('offline', 'registry: invalid manifest')
   if (m.schema > MANIFEST_SCHEMA) return { unsupported: true }
   if (typeof m.commit !== 'string' || !/^[0-9a-f]{7,40}$/.test(m.commit) || !m.files || typeof m.files !== 'object') {
@@ -222,7 +248,9 @@ export function getText(path) {
 
 // SVG of an operator logo: cached by its sha256 (re-downloaded when the sha
 // changes, checked against it). A logo without a sha (legacy data) is cached
-// by path.
+// by path. A copy cached by path (legacy cache, or moved from it) serves
+// when its hash matches; when the download fails, any copy of that path
+// still beats a monogram.
 export function getLogoText(path, sha) {
   if (!sha) return getText(path)
   const key = `logo:${sha}`
@@ -230,10 +258,19 @@ export function getLogoText(path, sha) {
     const p = (async () => {
       const cached = await readFile(logoUri(sha))
       if (cached != null) return cached
-      // the legacy cache holds the same file when its hash still matches
-      const legacy = await readFile(legacyUri(path))
-      const meta = await loadMeta()
-      const text = legacy != null && sha256(legacy) === sha ? legacy : await download(path, meta.commit || REGISTRY_TAG, sha)
+      const byPath = (await readFile(cacheUri(path))) ?? (await readFile(legacyUri(path)))
+      let text
+      if (byPath != null && sha256(byPath) === sha) {
+        text = byPath
+      } else {
+        const meta = await loadMeta()
+        try {
+          text = await download(path, meta.commit || REGISTRY_TAG, sha)
+        } catch (e) {
+          if (byPath == null) throw e
+          return byPath // older logo, not cached under the new sha: retried next session
+        }
+      }
       try { await writeAtomic(LOGO_DIR, logoUri(sha), text) } catch (e) { devWarn('registry logo write failed', path, e?.message) }
       return text
     })()
@@ -302,24 +339,19 @@ async function dropSvgs(prefix) {
   for (const k of [...memory.keys()]) if (k.startsWith(pathPrefix)) memory.delete(k)
 }
 
-// Once the v2 files are in: logos (content-addressed) and flags of the
-// legacy cache move over, then the legacy directory is removed
+// Once the v2 files are in: the legacy cache's logos and flags move to the
+// path cache (a rename, no hashing at start-up: a logo is checked against
+// its sha the first time it is shown), then the legacy directories go
 async function retireLegacy() {
-  const info = await FileSystem.getInfoAsync(LEGACY_DIR)
+  for (const dir of OLDER_DIRS) await FileSystem.deleteAsync(dir, { idempotent: true }).catch(() => {})
+  const info = await FileSystem.getInfoAsync(LEGACY_DIR).catch(() => ({ exists: false }))
   if (!info.exists) return
   try {
-    await FileSystem.makeDirectoryAsync(LOGO_DIR, { intermediates: true }).catch(() => {})
     await FileSystem.makeDirectoryAsync(CACHE_DIR, { intermediates: true }).catch(() => {})
     for (const n of await FileSystem.readDirectoryAsync(LEGACY_DIR)) {
-      if (n.startsWith('svg_logos_')) {
-        const text = await readFile(LEGACY_DIR + n)
-        if (text == null) continue
-        const to = logoUri(sha256(text))
-        if (!(await FileSystem.getInfoAsync(to)).exists) await writeAtomic(LOGO_DIR, to, text)
-      } else if (n.startsWith('svg_flags_')) {
-        const to = CACHE_DIR + n
-        if (!(await FileSystem.getInfoAsync(to)).exists) await FileSystem.moveAsync({ from: LEGACY_DIR + n, to })
-      }
+      if (!n.startsWith('svg_logos_') && !n.startsWith('svg_flags_')) continue
+      const to = CACHE_DIR + n
+      if (!(await FileSystem.getInfoAsync(to)).exists) await FileSystem.moveAsync({ from: LEGACY_DIR + n, to })
     }
     await FileSystem.deleteAsync(LEGACY_DIR, { idempotent: true })
   } catch (e) {
@@ -370,7 +402,7 @@ async function runCheck(iso2) {
     lastFailAt = now
   }
   await saveMeta(meta)
-  if (changed.length) emit(changed)
+  emit(changed) // also when nothing changed: a hook that failed reads again
   return changed
 }
 
