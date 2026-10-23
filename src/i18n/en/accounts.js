@@ -14,6 +14,15 @@ export default {
   'accounts.group.mobile_money': 'Mobile money',
   'accounts.group.microfinance': 'Microfinance',
   'accounts.group.fintech': 'Fintech',
+  'accounts.type.digital_bank': 'Digital bank',
+  'accounts.type.wallet': 'E-wallet',
+  'accounts.type.money_transfer': 'Money transfer',
+  'accounts.type.investment': 'Investment',
+  'accounts.group.digital_bank': 'Digital banks',
+  'accounts.group.wallet': 'E-wallets',
+  'accounts.group.money_transfer': 'Money transfer',
+  'accounts.group.investment': 'Investment',
+  'accounts.group.international': 'International',
 
   /* ----------------------- New account (search) -------------------------- */
   'accountForm.searchPlaceholder': 'Search banks & wallets',
