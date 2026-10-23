@@ -1,8 +1,9 @@
 // React hooks over the registry getters. Each returns
 // { data, loading, error, retry } — data null until loaded; error.code is
 // 'offline' or 'not_found'. Values already in memory are returned at once.
-// When a registry check swaps a file in, every mounted hook re-reads it in
-// place (the previous value stays on screen until the new one is ready).
+// After each registry check, every mounted hook re-reads in place (the
+// previous value stays on screen until the new one is ready). A failed read
+// (other than not_found) retries by itself: 2 s, 4 s, 8 s… up to 60 s.
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useFocusEffect } from '@react-navigation/native'
 import {
@@ -17,9 +18,13 @@ export const useRegistryRevision = () => useSyncExternalStore(subscribeRegistry,
 // True while a registry check or download runs
 export const useRegistryBusy = () => useSyncExternalStore(subscribeRegistryBusy, isRegistryBusy)
 
+const RETRY_FIRST_MS = 2000
+const RETRY_MAX_MS = 60000
+
 function useAsyncValue(load, key, initial) {
   const [state, setState] = useState(() => ({ data: initial ?? null, loading: initial === undefined && key != null, error: null }))
   const [attempt, setAttempt] = useState(0)
+  const failures = useRef(0)
   const revision = useRegistryRevision()
   const initialRef = useRef(initial)
   initialRef.current = initial
@@ -31,12 +36,20 @@ function useAsyncValue(load, key, initial) {
     // same key keeps it until the reload ends
     if (keyRef.current !== key) {
       keyRef.current = key
+      failures.current = 0
       setState({ data: initialRef.current ?? null, loading: initialRef.current === undefined, error: null })
     }
+    let timer = null
     load()
-      .then((data) => { if (alive) setState({ data, loading: false, error: null }) })
-      .catch((error) => { if (alive) setState((s) => (s.data != null ? { ...s, loading: false } : { data: null, loading: false, error })) })
-    return () => { alive = false }
+      .then((data) => { if (alive) { failures.current = 0; setState({ data, loading: false, error: null }) } })
+      .catch((error) => {
+        if (!alive) return
+        setState((s) => (s.data != null ? { ...s, loading: false } : { data: null, loading: false, error }))
+        if (error?.code === 'not_found') return
+        const wait = Math.min(RETRY_MAX_MS, RETRY_FIRST_MS * 2 ** failures.current++)
+        timer = setTimeout(() => { if (alive) setAttempt((a) => a + 1) }, wait)
+      })
+    return () => { alive = false; if (timer) clearTimeout(timer) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, attempt, revision])
   const retry = useCallback(() => setAttempt((a) => a + 1), [])

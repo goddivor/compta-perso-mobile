@@ -213,14 +213,15 @@ export default function OnboardingScreen({ navigation, route }) {
   )
 
   // The operators of the profile country are still loading (also true on the
-  // first render of the step, before the hook's effect flags it as loading):
-  // the search field shows, disabled, and skeleton tiles hold the grid's place
-  const opsLoading = withAccountStep && step === 2 && !isoMode && !!iso2 && !operators.data && !operators.error
+  // first render of the step, before the hook's effect flags it as loading),
+  // or a failed download is waiting for its automatic retry: the search
+  // field shows, disabled, and skeleton tiles hold the grid's place
+  const opsLoading = accountStep && !!iso2 && !operators.data && operators.error?.code !== 'not_found'
 
   /* -------------------------------- render -------------------------------- */
   const title = [t('onboarding.country'), t('onboarding.currency'), t('onboarding.account')][step]
   const offline = step === 0 && !countries.data && !countries.loading && countries.error
-  const showSearch = !offline && ((step === 0) || (step === 1 && isoMode && (currencies.data || fallback)) || (step === 2 && !isoMode && iso2 && !operators.error && (operators.data || opsLoading)))
+  const showSearch = !offline && ((step === 0) || (step === 1 && isoMode && (currencies.data || fallback)) || (step === 2 && !isoMode && iso2 && (operators.data || opsLoading)))
   const placeholder = step === 0 ? t('onboarding.search') : step === 1 ? t('onboarding.currencySearch') : searchPlaceholder(t, opCount)
   const noCountry = step === 0 && !!query.trim() && countryRows.length === 0
 
