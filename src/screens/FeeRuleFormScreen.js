@@ -10,7 +10,8 @@ import { useTheme, fonts, radius } from '../theme/tokens'
 import { listFeeRules, createFeeRule, updateFeeRule, deleteFeeRule } from '../db/database'
 import { useRefresh } from '../context/AppContext'
 import { useT } from '../i18n'
-import { fmtNumber, CURRENCY_LABEL } from '../utils/format'
+import { fmtNumber, fmtParts } from '../utils/format'
+import { useAmountFormat } from '../context/CurrencyContext'
 import { feeRuleLabel } from '../utils/fees'
 import { Chip, ConfirmDialog } from '../components/v2'
 import { Field, Input, Segmented, Button } from '../components/ui'
@@ -26,6 +27,8 @@ const newRow = (max = '', fee = '') => ({ k: ++rowKey, max: String(max), fee: St
 const num = (s) => Number(String(s).replace(/\s/g, '').replace(',', '.'))
 
 export default function FeeRuleFormScreen({ navigation, route }) {
+  const { label: currencyLabel } = useAmountFormat()
+  const symbolLeads = !!fmtParts(0).before
   const { colors } = useTheme()
   const t = useT()
   const refresh = useRefresh()
@@ -125,7 +128,7 @@ export default function FeeRuleFormScreen({ navigation, route }) {
 
         {kind === 'fixed' ? (
           <Field label={t('feeRule.amount')}>
-            <SuffixInput keyboardType="numeric" value={fixed} onChangeText={setFixed} suffix={CURRENCY_LABEL} placeholder="0" />
+            <SuffixInput keyboardType="numeric" value={fixed} onChangeText={setFixed} prefix={symbolLeads ? currencyLabel : undefined} suffix={symbolLeads ? undefined : currencyLabel} placeholder="0" />
           </Field>
         ) : null}
 
