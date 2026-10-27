@@ -1,6 +1,6 @@
 {
   "name": "compta-perso-mobile",
-  "version": "2.0.3",
+  "version": "2.1.0",
   "main": "index.js",
   "dependencies": {
     "@expo-google-fonts/poppins": "^0.4.1",
