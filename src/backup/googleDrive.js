@@ -9,6 +9,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import * as Device from 'expo-device'
 import { dumpAllData, restoreAllData } from '../db/database'
 import { getCurrentVersion } from '../updates/updater'
+import { withoutLock } from '../lock/guard'
 
 // The native module only exists in full builds (dev build / APK), not in
 // Expo Go: load it lazily so the whole bundle keeps working there.
@@ -82,7 +83,13 @@ async function storeAccount(user) {
 
 // Interactive sign-in (button). Throws BackupError; 'cancelled' when the
 // user closes the account picker.
-export async function signIn() {
+// The Google account picker leaves the app: the app lock is not asked again
+// on the way back
+export function signIn() {
+  return withoutLock(signInInteractive)
+}
+
+async function signInInteractive() {
   ensureConfigured()
   const hasPlay = await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true })
     .catch(() => false)

@@ -5,6 +5,7 @@
 import * as FileSystem from 'expo-file-system/legacy'
 import * as IntentLauncher from 'expo-intent-launcher'
 import { Linking } from 'react-native'
+import { withoutLock } from '../lock/guard'
 
 const APK_FILE = 'compta-perso-update.apk'
 // Intent.FLAG_GRANT_READ_URI_PERMISSION
@@ -60,7 +61,12 @@ export async function downloadApk(url, onProgress) {
 
 // Open the Android package installer over the app for the downloaded APK.
 // Falls back to a VIEW intent, then (last resort) to the release page URL.
-export async function installApk(fileUri, fallbackPageUrl) {
+// The app lock is not asked again on the way back from the installer.
+export function installApk(fileUri, fallbackPageUrl) {
+  return withoutLock(() => openInstaller(fileUri, fallbackPageUrl))
+}
+
+async function openInstaller(fileUri, fallbackPageUrl) {
   const contentUri = await FileSystem.getContentUriAsync(fileUri)
   try {
     await IntentLauncher.startActivityAsync('android.intent.action.INSTALL_PACKAGE', {
