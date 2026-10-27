@@ -24,6 +24,8 @@ export default {
   'accounts.group.money_transfer': 'Transfert d’argent',
   'accounts.group.investment': 'Investissement',
   'accounts.group.international': 'International',
+  'accounts.type.other': 'Autre',
+  'accounts.group.other': 'Autres',
 
   /* ---------------------- Nouveau compte (recherche) --------------------- */
   'accountForm.searchPlaceholder': 'Chercher parmi les opérateurs',
