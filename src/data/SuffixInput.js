@@ -1,12 +1,14 @@
-// Numeric/text input with a quiet unit on its right ("FCFA", "%"), shared by
-// the account and fee rule forms. Same box as the v1 Input.
+// Numeric/text input with a quiet unit on its right ("FCFA", "%"), or on
+// its left (`prefix`: a currency symbol that leads the number, "₦"), shared
+// by the account and fee rule forms. Same box as the v1 Input.
 import { View, Text, TextInput, StyleSheet } from 'react-native'
 import { useTheme, fonts, radius } from '../theme/tokens'
 
-export function SuffixInput({ suffix, style, inputStyle, ...props }) {
+export function SuffixInput({ suffix, prefix, style, inputStyle, ...props }) {
   const { colors } = useTheme()
   return (
     <View style={[styles.box, { backgroundColor: colors.surface, borderColor: colors.line }, style]}>
+      {prefix ? <Text style={[styles.suffix, { color: colors.faint }]}>{prefix}</Text> : null}
       <TextInput
         placeholderTextColor={colors.faint}
         style={[styles.input, { color: colors.ink }, inputStyle]}

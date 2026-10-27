@@ -42,12 +42,13 @@ export function searchOperators(operators, query, { limit = 50 } = {}) {
 }
 
 // The operator an account name most likely means, or null when unsure:
-// the name equals an operator name or alias, or is a word prefix of exactly one
+// the name equals an operator name or alias, or is a word prefix of exactly
+// one. Merchant-only gateways (`consumer: false`) are never proposed.
 export function suggestOperator(operators, accountName) {
   const n = normalizeText(accountName).replace(/[^a-z0-9]+/g, ' ').trim()
   if (!n || !operators) return null
   const same = (s) => normalizeText(s).replace(/[^a-z0-9]+/g, ' ').trim() === n
-  const active = operators.filter((o) => (o.status || 'active') === 'active')
+  const active = operators.filter((o) => (o.status || 'active') === 'active' && o.consumer !== false)
   const exact = active.find((o) => same(o.name) || (o.aliases || []).some(same))
   if (exact) return exact
   const hits = searchOperators(active, accountName, { limit: 2 })

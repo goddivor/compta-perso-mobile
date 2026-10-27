@@ -13,7 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { LineChart, BarChart } from 'react-native-gifted-charts'
 import { useTheme, fonts, radius } from '../theme/tokens'
 import { listAccounts, getBalanceHistory, getExpensesByCategory, getMonthlyFlow } from '../db/database'
-import { fmtNumber, getFormatLocale, today, shiftDay, monthShortLabel } from '../utils/format'
+import { fmtNumber, fmtCompact, getFormatLocale, today, shiftDay, monthShortLabel } from '../utils/format'
 import { useTick } from '../context/AppContext'
 import { useFilters, emptyFilters } from '../context/FiltersContext'
 import { useFocusData } from '../hooks/useFocusData'
@@ -32,13 +32,8 @@ function windowFrom(period) {
   return null
 }
 
-// Compact FCFA amounts for chart axes (12k, 1,5M…)
-function compact(n) {
-  const abs = Math.abs(n)
-  if (abs >= 1e6) return new Intl.NumberFormat(getFormatLocale(), { maximumFractionDigits: 1 }).format(n / 1e6) + 'M'
-  if (abs >= 1e3) return Math.round(n / 1e3) + 'k'
-  return String(Math.round(n))
-}
+// Compact amounts for chart axes (12k, 1,5M…): fmtCompact, country's decimal mark
+const compact = fmtCompact
 
 // Floor of the balance axis: 0 while the plotted balance never goes negative
 // (a balance axis below zero reads as a debt that never happened); otherwise
