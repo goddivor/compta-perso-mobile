@@ -11,13 +11,21 @@
     },
     "android": {
       "package": "com.divor.comptaperso",
-      "permissions": ["REQUEST_INSTALL_PACKAGES"],
+      "permissions": [
+        "REQUEST_INSTALL_PACKAGES",
+        "USE_BIOMETRIC",
+        "USE_FINGERPRINT"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
-      }
+      },
+      "blockedPermissions": [
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.DETECT_SCREEN_CAPTURE"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -25,7 +33,9 @@
     "plugins": [
       "expo-sqlite",
       "expo-font",
-      "expo-localization"
+      "expo-localization",
+      "expo-secure-store",
+      "expo-local-authentication"
     ]
   }
 }
