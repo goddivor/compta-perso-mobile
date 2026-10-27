@@ -12,8 +12,9 @@ import settings from './fr/settings'
 import categories from './fr/categories'
 import stats from './fr/stats'
 import report from './fr/report'
+import lock from './fr/lock'
 
 // Area name → its dictionary (index.js checks for duplicate keys in development)
-export const areas = { common, onboarding, home, transactions, txform, accounts, filter, simulations, settings, categories, stats, report }
+export const areas = { common, onboarding, home, transactions, txform, accounts, filter, simulations, settings, categories, stats, report, lock }
 
 export default Object.assign({}, ...Object.values(areas))

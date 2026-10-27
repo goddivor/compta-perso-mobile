@@ -74,6 +74,7 @@ export default {
   'common.feeRuleDefault': 'Account fees',
   'common.included': 'included',
   'common.excluded': 'excluded',
+  'common.next': 'Next',
   'common.offline': 'No connection',
   'nav.onboarding': 'Welcome',
   'nav.feeRule': 'Fee rule',
