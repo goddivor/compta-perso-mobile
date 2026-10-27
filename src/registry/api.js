@@ -135,7 +135,9 @@ export async function getLogo(operatorId) {
   if (!op?.logo?.svg) return null
   const key = logoKey(op.logo)
   if (!peek(key)) {
-    const xml = await getLogoText(op.logo.svg, op.logo.sha256)
+    // fetched at the commit of the file that described it (its sha is from there)
+    const source = isInternationalId(operatorId) ? INTERNATIONAL : operatorsPath(operatorCountry(operatorId))
+    const xml = await getLogoText(op.logo.svg, op.logo.sha256, source)
     remember(key, { xml, layout: logoLayout(xml), background: op.logo.background ?? null })
   }
   return peek(key)

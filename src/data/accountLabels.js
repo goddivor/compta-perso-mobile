@@ -2,11 +2,21 @@
 // caller (from useT()) so the screens re-render when the language changes.
 import { fmt, getFormatLocale } from '../utils/format'
 
+// A key of an operator type, or the generic "other" one for a type this
+// version does not know (a later registry may add types)
+const typeKey = (t, prefix, type) => {
+  const key = `${prefix}.${type}`
+  return type && t(key) !== key ? key : `${prefix}.other`
+}
+
 // registry operator type ('bank', 'mobile_money', …) → "Banque" / "Mobile money" …
-export const operatorTypeLabel = (t, type) => t(`accounts.type.${type}`)
+export const operatorTypeLabel = (t, type) => t(typeKey(t, 'accounts.type', type))
 
 // Plural group title of an operator type → "Banques" …
-export const operatorGroupLabel = (t, type) => t(`accounts.group.${type}`)
+export const operatorGroupLabel = (t, type) => t(typeKey(t, 'accounts.group', type))
+
+// Whether this version has a label for an operator type
+export const isKnownOperatorType = (t, type) => typeKey(t, 'accounts.type', type) !== 'accounts.type.other'
 
 // 0.01 → "1" (a percent rule stores a fraction); decimals follow the app language
 export function percentText(fraction) {

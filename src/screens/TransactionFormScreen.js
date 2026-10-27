@@ -29,7 +29,8 @@ import {
   addForecastTransaction,
   addForecastTransfer,
 } from '../db/database'
-import { fmt, fmtNumber, today, isValidDay, CURRENCY_LABEL } from '../utils/format'
+import { fmt, fmtNumber, fmtParts, today, isValidDay } from '../utils/format'
+import { useAmountFormat } from '../context/CurrencyContext'
 import { feeSuggestions, feeRuleLabel } from '../utils/fees'
 import { useRefresh } from '../context/AppContext'
 import { useI18n } from '../i18n'
@@ -132,6 +133,8 @@ function feeChipLabel(rule, fee, pct, fallback) {
 // --- end pure form logic ---
 
 export default function TransactionFormScreen({ navigation, route }) {
+  const { label: currencyLabel } = useAmountFormat()
+  const symbolLeads = !!fmtParts(0).before
   const { colors } = useTheme()
   const { t, locale } = useI18n()
   const refresh = useRefresh()
@@ -372,6 +375,7 @@ export default function TransactionFormScreen({ navigation, route }) {
           <View style={[styles.hero, { backgroundColor: colors.surface, borderColor: focus === 'amount' ? colors.primary600 : colors.line, borderWidth: focus === 'amount' ? 2 : 1 }]}>
             <Text style={[styles.heroLabel, { color: colors.muted }]}>{t('form.amount')}</Text>
             <View style={styles.heroRow}>
+              {symbolLeads ? <Text style={[styles.heroCur, { color: colors.muted }]}>{currencyLabel}</Text> : null}
               <TextInput
                 value={grouped(form.amount)}
                 onChangeText={editAmount}
@@ -385,7 +389,7 @@ export default function TransactionFormScreen({ navigation, route }) {
                 accessibilityLabel={t('form.amount')}
                 style={[styles.heroInput, { color: colors.ink }]}
               />
-              <Text style={[styles.heroCur, { color: colors.muted }]}>{CURRENCY_LABEL}</Text>
+              {symbolLeads ? null : <Text style={[styles.heroCur, { color: colors.muted }]}>{currencyLabel}</Text>}
             </View>
           </View>
 
@@ -479,6 +483,7 @@ export default function TransactionFormScreen({ navigation, route }) {
             <View>
               {label(t('form.fees'))}
               <View style={box('fees', styles.feesBox)}>
+                {symbolLeads ? <Text style={[styles.cur, { color: colors.muted }]}>{currencyLabel}</Text> : null}
                 <TextInput
                   value={grouped(form.fees)}
                   onChangeText={editFees}
@@ -496,7 +501,7 @@ export default function TransactionFormScreen({ navigation, route }) {
                     {t('form.debited', { amount: fmtNumber(totalDebit) })}
                   </Text>
                 ) : null}
-                <Text style={[styles.cur, { color: colors.muted }]}>{CURRENCY_LABEL}</Text>
+                {symbolLeads ? null : <Text style={[styles.cur, { color: colors.muted }]}>{currencyLabel}</Text>}
               </View>
               {suggestions.length ? (
                 <View style={styles.chips}>

@@ -27,9 +27,9 @@ import { RegistryProgress } from '../components/RegistryProgress'
 import { Field, Input, Button } from '../components/ui'
 import { nextAccountColor } from '../data/accountColors'
 import { SuffixInput } from '../data/SuffixInput'
-import { operatorTypeLabel, operatorGroupLabel, ruleSummary, RULE_ICON } from '../data/accountLabels'
+import { operatorTypeLabel, operatorGroupLabel, isKnownOperatorType, ruleSummary, RULE_ICON } from '../data/accountLabels'
 import {
-  kindControls, saveBeforeRule, isActiveOperator, popularTitle, balanceToSave,
+  kindControls, saveBeforeRule, isActiveOperator, popularTitle, balanceToSave, wholeAmountText,
   activeOperatorCount, searchPlaceholder, showSearchAll,
 } from '../data/accountForm'
 import { popularOperators, OPERATOR_TYPE_ORDER } from '../data/popularOperators'
@@ -136,11 +136,14 @@ function OperatorSearch({ countryIso2, linkMode, canUnlink, onPickOperator, onPi
   const groups = useMemo(() => {
     if (!operators || !q) return []
     const hits = searchOperators(operators.filter(isActiveOperator), q, { limit: 1000 })
-    // a type this version does not know yet goes after the known ones
-    const types = [...TYPE_ORDER, ...new Set(hits.map((o) => o.type).filter((ty) => !TYPE_ORDER.includes(ty)))]
-    return types
-      .map((type) => ({ key: type, title: operatorGroupLabel(t, type), items: hits.filter((o) => o.type === type) }))
-      .filter((g) => g.items.length)
+    // a type this version does not know yet goes after the known ones, all
+    // of them in one "Other" group
+    const unknown = (ty) => !TYPE_ORDER.includes(ty) && !isKnownOperatorType(t, ty)
+    const types = [...TYPE_ORDER, ...new Set(hits.map((o) => o.type).filter((ty) => !TYPE_ORDER.includes(ty) && !unknown(ty)))]
+    return [
+      ...types.map((type) => ({ key: type, title: operatorGroupLabel(t, type), items: hits.filter((o) => o.type === type) })),
+      { key: 'other', title: t('accounts.group.other'), items: hits.filter((o) => unknown(o.type)) },
+    ].filter((g) => g.items.length)
   }, [operators, q, t])
 
   // International services after the country's results, in their own section
@@ -288,7 +291,7 @@ export default function AccountFormScreen({ navigation, route }) {
     setType(a.type)
     setOperatorId(a.operator_id || null)
     setName(a.name)
-    setBalance(String(a.initial_balance ?? 0))
+    setBalance(String(Math.round(a.initial_balance ?? 0))) // a v1 decimal shows whole; saved exact until edited
     setExactBalance(a.initial_balance ?? null)
   }, [editId])
 
@@ -430,9 +433,9 @@ export default function AccountFormScreen({ navigation, route }) {
 
         <Field label={editId ? t('accountForm.initialBalance') : t('accountForm.currentBalance')}>
           <SuffixInput
-            keyboardType="numeric"
+            keyboardType="numeric" // number-pad has no minus key; a starting balance may be negative
             value={balance}
-            onChangeText={(v) => { setExactBalance(null); setBalance(v.replace(',', '.')) }}
+            onChangeText={(v) => { setExactBalance(null); setBalance(wholeAmountText(v, { negative: true })) }}
             placeholder="0"
             prefix={symbolLeads ? currencyLabel : undefined}
             suffix={symbolLeads ? undefined : currencyLabel}

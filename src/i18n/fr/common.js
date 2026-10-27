@@ -74,6 +74,7 @@ export default {
   'common.feeRuleDefault': 'Frais du compte',
   'common.included': 'inclus',
   'common.excluded': 'exclu',
+  'common.next': 'Suivant',
   'common.offline': 'Pas de connexion',
   'nav.onboarding': 'Bienvenue',
   'nav.feeRule': 'Règle de frais',

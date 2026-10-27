@@ -6,13 +6,15 @@
 // data file). checkRegistry() reads it, downloads from jsDelivr at the
 // manifest's commit every data file the app uses whose sha256 changed,
 // checks each download against the manifest, and swaps it in memory
-// (subscribers re-read). Logos are cached by their `logo.sha256` and
-// checked against it. A failed or offline check is silent: the cache stays.
+// (subscribers re-read). Logos are cached by their `logo.sha256`, fetched at
+// the commit of the data file that described them and checked against it.
+// A failed or offline check is silent: the cache stays.
 //
 // Cache layout under documentDirectory/registry/ (no per-tag directory):
 //   cache/<path with / as _>   data files (sha in meta.json) and other SVGs
 //   logos/<sha256>.svg         operator logos, content-addressed
-//   meta.json                  last manifest, cached shas, last check time
+//   meta.json                  last manifest, cached shas and the ref each
+//                              cached data file came from, last check time
 //   v1.2.0/                    cache of app 2.0.3 and older (legacy): read as
 //                              a fallback until the v2 files are downloaded,
 //                              then its logos and flags move over and it is
@@ -21,7 +23,9 @@
 // a failed download never leaves a half-written cache file.
 //
 // Errors: a rejected promise with err.code = 'offline' (no cache and no
-// network) or 'not_found' (HTTP 404 or not in the manifest).
+// network) or 'not_found' (HTTP 404, not in the manifest, or a download that
+// does not match its sha256: content at a fixed commit never changes, so it
+// is not retried).
 import * as FileSystem from 'expo-file-system/legacy'
 import { sha256 } from './sha256'
 
@@ -111,9 +115,29 @@ async function readFile(uri) {
   }
 }
 
+// A data file from a cache, or null when it is missing or does not parse
+// (a truncated file from an older app): the caller falls through to the
+// next source instead of failing on it forever. The parse is kept for
+// getJson, so a 500 KB operator file is not parsed twice.
+const parsed = new Map() // path → [text, value] of the last cache read
+async function readData(uri, path) {
+  const text = await readFile(uri)
+  if (text == null) return null
+  try {
+    const value = JSON.parse(text)
+    if (path) parsed.set(path, [text, value])
+    return text
+  } catch {
+    devWarn('registry cache file unreadable, skipped', uri)
+    return null
+  }
+}
+const readSource = (uri, path) => (isData(path) ? readData(uri, path) : readFile(uri))
+
 // Temporary file (unique name: two writers of one file never share it),
 // then a rename over the target (atomic on Android). Writes to one target
 // run one after the other.
+const SESSION_START = Date.now()
 let tmpSeq = 0
 const writing = new Map() // uri → Promise of the last write
 function writeAtomic(dir, uri, text) {
@@ -132,6 +156,20 @@ function writeAtomic(dir, uri, text) {
   writing.set(uri, p)
   p.finally(() => { if (writing.get(uri) === p) writing.delete(uri) }).catch(() => {})
   return p
+}
+
+// Temporary files left by a write that an earlier session never finished
+// (app killed between write and rename). Only names stamped before this
+// session started: a write of this session is never touched.
+async function cleanStaleTmp() {
+  for (const dir of [ROOT, CACHE_DIR, LOGO_DIR]) {
+    let names = []
+    try { names = await FileSystem.readDirectoryAsync(dir) } catch { continue }
+    for (const n of names) {
+      const m = /\.(\d+)-\d+\.tmp$/.exec(n)
+      if (m && Number(m[1]) < SESSION_START) await FileSystem.deleteAsync(dir + n, { idempotent: true }).catch(() => {})
+    }
+  }
 }
 
 async function fetchText(url, label, timeoutMs = FILE_TIMEOUT_MS) {
@@ -160,13 +198,16 @@ async function fetchText(url, label, timeoutMs = FILE_TIMEOUT_MS) {
 const MAX_PARALLEL = 4
 let active = 0
 const waiting = []
+// A finished request hands its slot straight to the next waiter (`active`
+// stays the same): a caller arriving before the waiter resumes cannot take
+// the slot too and push the count above MAX_PARALLEL.
 async function limited(work) {
   if (active >= MAX_PARALLEL) await new Promise((resolve) => waiting.push(resolve))
-  active++
+  else active++
   try { return await work() } finally {
-    active--
     const next = waiting.shift()
     if (next) next()
+    else active--
   }
 }
 const downloading = new Map() // `${ref}|${path}` → Promise<string>
@@ -178,7 +219,7 @@ function download(path, ref, sha) {
     p.finally(() => downloading.delete(key)).catch(() => {})
   }
   return downloading.get(key).then((text) => {
-    if (sha && sha256(text) !== sha) throw fail('offline', `registry: ${path} does not match its sha256`)
+    if (sha && sha256(text) !== sha) throw fail('not_found', `registry: ${path} at ${ref} does not match its sha256`)
     if (isData(path)) JSON.parse(text) // a truncated file never reaches the cache
     return text
   })
@@ -186,17 +227,38 @@ function download(path, ref, sha) {
 
 /* ---------------------------------- meta ---------------------------------- */
 
-// { commit, tag, files: { path: sha } (last manifest), cached: { path: sha|null }, lastCheck }
+// { commit, tag, files: { path: sha } (last manifest), cached: { path: sha|null },
+//   cachedRef: { path: commit or tag the cached data file was downloaded at }, lastCheck }
 let metaPromise = null
 function loadMeta() {
   if (!metaPromise) {
     metaPromise = readFile(META_URI).then((text) => {
       let m = null
       try { m = text ? JSON.parse(text) : null } catch { m = null }
-      return { commit: null, tag: null, files: {}, cached: {}, lastCheck: 0, ...(m || {}) }
+      const meta = { commit: null, tag: null, files: {}, cached: {}, lastCheck: 0, ...(m || {}) }
+      if (!meta.cachedRef) {
+        // meta of app 2.1.0 (no refs yet): a cached file that matches the
+        // saved manifest came from the saved commit
+        meta.cachedRef = {}
+        for (const [path, sha] of Object.entries(meta.cached)) {
+          if (meta.commit && sha && meta.files[path] === sha) meta.cachedRef[path] = meta.commit
+        }
+      }
+      return meta
     })
+    cleanStaleTmp().catch((e) => devWarn('registry tmp cleanup failed', e?.message))
   }
   return metaPromise
+}
+
+// Ref to fetch the logos a data file describes at: the commit that file was
+// downloaded at. A file whose ref is unknown (cached by app 2.1.0 and
+// already behind its manifest) falls back to the manifest's commit: a logo
+// that does not match there fails once for the session, and the next
+// complete check replaces the file.
+function dataRef(meta, source) {
+  if (source && meta.cachedRef[source]) return meta.cachedRef[source]
+  return meta.commit || REGISTRY_TAG
 }
 async function saveMeta(meta) {
   try { await writeAtomic(ROOT, META_URI, JSON.stringify(meta)) } catch (e) { devWarn('registry meta write failed', e?.message) }
@@ -236,18 +298,20 @@ async function ensureManifest(meta) {
 export function getText(path) {
   if (!memory.has(path)) {
     const p = (async () => {
-      const cached = await readFile(cacheUri(path))
+      const cached = await readSource(cacheUri(path), path)
       if (cached != null) return cached
-      const legacy = await readFile(legacyUri(path))
+      const legacy = await readSource(legacyUri(path), path)
       if (legacy != null) return legacy
       const meta = await loadMeta()
       if (isData(path)) await ensureManifest(meta)
       if (isData(path) && meta.commit && !meta.files[path]) throw fail('not_found', `registry: ${path} not in the manifest`)
-      const text = await download(path, meta.commit || REGISTRY_TAG, isData(path) ? meta.files[path] : null)
+      const ref = meta.commit || REGISTRY_TAG
+      const text = await download(path, ref, isData(path) ? meta.files[path] : null)
       try {
         await writeAtomic(CACHE_DIR, cacheUri(path), text)
         if (isData(path)) {
           meta.cached[path] = (meta.commit && meta.files[path]) || null
+          meta.cachedRef[path] = ref
           await saveMeta(meta)
         }
       } catch (e) {
@@ -266,7 +330,11 @@ export function getText(path) {
 // by path. A copy cached by path (legacy cache, or moved from it) serves
 // when its hash matches; when the download fails, any copy of that path
 // still beats a monogram.
-export function getLogoText(path, sha) {
+//   source: the data file that described the logo ('data/operators/NG.json',
+//   'data/international.json'); the logo is fetched at that file's commit,
+//   where its sha is the one the file carries. A logo that does not match
+//   its sha there fails as not_found for the rest of the session.
+export function getLogoText(path, sha, source) {
   if (!sha) return getText(path)
   const key = `logo:${sha}`
   if (!memory.has(key)) {
@@ -280,7 +348,7 @@ export function getLogoText(path, sha) {
       } else {
         const meta = await loadMeta()
         try {
-          text = await download(path, meta.commit || REGISTRY_TAG, sha)
+          text = await download(path, dataRef(meta, source), sha)
         } catch (e) {
           if (byPath == null) throw e
           return byPath // older logo, not cached under the new sha: retried next session
@@ -290,7 +358,9 @@ export function getLogoText(path, sha) {
       return text
     })()
     memory.set(key, p)
-    p.catch(() => memory.delete(key))
+    // let a later call retry, except a logo that does not match its sha at
+    // its file's commit: that never changes, so it stays failed this session
+    p.catch((e) => { if (e?.code !== 'not_found') memory.delete(key) })
   }
   return memory.get(key)
 }
@@ -299,27 +369,37 @@ export function getLogoText(path, sha) {
 // the network: null when it was never downloaded (fast, offline-safe boot).
 export async function getCachedText(path) {
   if (memory.has(path)) return memory.get(path)
-  const cached = await readFile(cacheUri(path))
+  const cached = await readSource(cacheUri(path), path)
   if (cached != null) return cached
-  return readFile(legacyUri(path))
+  return readSource(legacyUri(path), path)
+}
+
+// Each swap by a check bumps the path's version: a read that started before
+// the swap returns the newer value instead of overwriting it with the old one
+const versions = new Map() // path → number
+function parseInto(path, version, text) {
+  if ((versions.get(path) || 0) !== version && values.has(path)) return values.get(path)
+  const pre = parsed.get(path)
+  parsed.delete(path)
+  const v = pre && pre[0] === text ? pre[1] : JSON.parse(text)
+  values.set(path, v)
+  return v
 }
 
 // Parsed JSON of a cached registry file, or null (see getCachedText)
 export async function getCachedJson(path) {
   if (values.has(path)) return values.get(path)
+  const version = versions.get(path) || 0
   const text = await getCachedText(path)
-  if (text == null) return null
-  const v = JSON.parse(text)
-  values.set(path, v)
-  return v
+  if (text == null) return values.get(path) ?? null
+  return parseInto(path, version, text)
 }
 
 // Parsed JSON of a registry file (cached parse)
 export async function getJson(path) {
   if (values.has(path)) return values.get(path)
-  const v = JSON.parse(await getText(path))
-  values.set(path, v)
-  return v
+  const version = versions.get(path) || 0
+  return parseInto(path, version, await getText(path))
 }
 
 // Synchronous read of something already loaded (undefined otherwise)
@@ -342,16 +422,40 @@ async function cachedDataPaths(dir) {
   }
 }
 
-// The SVGs cached by path that a changed data file may describe differently
-// (currency signs, flags carry no sha256): dropped, fetched again on demand
-async function dropSvgs(prefix) {
-  try {
-    for (const n of await FileSystem.readDirectoryAsync(CACHE_DIR)) {
-      if (n.startsWith(prefix)) await FileSystem.deleteAsync(CACHE_DIR + n, { idempotent: true })
-    }
-  } catch { /* no cache directory yet */ }
-  const pathPrefix = prefix.replace(/_/g, '/')
-  for (const k of [...memory.keys()]) if (k.startsWith(pathPrefix)) memory.delete(k)
+// SVG art each entry of a data file points to (flags and currency signs
+// carry no sha256): [key, art object, [svg paths]]
+const ART = {
+  'data/countries.json': (v) => (v?.countries || []).map((c) => [c.iso2, c.flag, [c.flag?.svg, c.flag?.svgSquare]]),
+  'data/currencies.json': (v) => (v?.currencies || []).map((c) => [c.code, c.sign, [c.sign?.svg, c.sign?.svgColor]]),
+}
+function artOf(path, value) {
+  const out = new Map()
+  for (const [key, art, paths] of ART[path](value)) out.set(key, { art: JSON.stringify(art ?? null), paths: paths.filter(Boolean) })
+  return out
+}
+
+// After a countries or currencies swap: drops only the cached SVGs of the
+// entries whose art changed or vanished (fetched again on demand). Every
+// other flag and sign stays cached, so they still show offline.
+async function dropChangedArt(path, before, after) {
+  if (!ART[path] || !before) return
+  const next = artOf(path, after)
+  const stale = new Set()
+  for (const [key, old] of artOf(path, before)) {
+    const now = next.get(key)
+    if (!now || now.art !== old.art) for (const p of [...old.paths, ...(now?.paths || [])]) stale.add(p)
+  }
+  for (const p of stale) {
+    memory.delete(p)
+    await FileSystem.deleteAsync(cacheUri(p), { idempotent: true }).catch(() => {})
+  }
+}
+
+// Parsed value of a data file as cached before a swap (null when unknown)
+async function previousValue(path) {
+  if (values.has(path)) return values.get(path)
+  const text = (await readData(cacheUri(path))) ?? (await readData(legacyUri(path)))
+  try { return text == null ? null : JSON.parse(text) } catch { return null }
 }
 
 // Once the v2 files are in: the legacy cache's logos and flags move to the
@@ -383,6 +487,8 @@ async function runCheck(iso2) {
     await saveMeta(meta)
     return []
   }
+  // the manifest moves on even if a download below fails: each cached file
+  // keeps its own ref in meta.cachedRef, and its logos are fetched there
   Object.assign(meta, { commit: m.commit, tag: m.tag, files: m.files })
   const targets = new Set([
     ...GLOBAL_FILES,
@@ -398,18 +504,21 @@ async function runCheck(iso2) {
     if (!sha || meta.cached[path] === sha) continue
     try {
       const text = await download(path, m.commit, sha)
+      const before = ART[path] ? await previousValue(path) : null
       await writeAtomic(CACHE_DIR, cacheUri(path), text)
       meta.cached[path] = sha
+      meta.cachedRef[path] = m.commit
       memory.set(path, Promise.resolve(text))
-      values.set(path, JSON.parse(text))
+      const value = JSON.parse(text)
+      versions.set(path, (versions.get(path) || 0) + 1)
+      values.set(path, value)
       changed.push(path)
+      await dropChangedArt(path, before, value)
     } catch (e) {
       failed = true
       devWarn('registry update failed', path, e?.message)
     }
   }
-  if (changed.includes('data/currencies.json')) await dropSvgs('svg_currencies_')
-  if (changed.includes('data/countries.json')) await dropSvgs('svg_flags_')
   if (!failed) {
     meta.lastCheck = now
     await retireLegacy()

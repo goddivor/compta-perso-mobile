@@ -8,6 +8,9 @@
 // opens on top of the tabs at launch (owner's upgraded data included); the
 // update sheet and the Drive auto-backup wait until the profile is complete.
 // Registry: checked for an update at start-up when the last check is > 24 h old.
+// App lock (optional): LockProvider shows the lock screen above the whole
+// navigation at launch and on return once the delay has passed; the update
+// sheet waits while the app is locked.
 import { useEffect, useState } from 'react'
 import { View, Text, ActivityIndicator, useColorScheme } from 'react-native'
 import { StatusBar } from 'expo-status-bar'
@@ -31,6 +34,7 @@ import { getDb, getProfile, listAccounts } from './src/db/database'
 import { AppProvider, useRefresh } from './src/context/AppContext'
 import { FiltersProvider } from './src/context/FiltersContext'
 import { PrivacyProvider } from './src/context/PrivacyContext'
+import { LockProvider, useLock } from './src/context/LockContext'
 import { CurrencyProvider, resolveProfileCurrencyLabel } from './src/context/CurrencyContext'
 import { setCurrencyLabel } from './src/utils/format'
 import { checkRegistry, subscribeRegistry, STARTUP_INTERVAL_MS } from './src/registry'
@@ -54,6 +58,7 @@ import AboutScreen from './src/screens/AboutScreen'
 import LanguageScreen from './src/screens/LanguageScreen'
 import OnboardingScreen from './src/screens/OnboardingScreen'
 import FeeRuleFormScreen from './src/screens/FeeRuleFormScreen'
+import LockSettingsScreen from './src/screens/LockSettingsScreen'
 import UpdateModal from './src/components/UpdateModal'
 import { getStartupUpdate, dismissUpdateVersion } from './src/updates/updater'
 import { maybeAutoBackup } from './src/backup/googleDrive'
@@ -139,6 +144,7 @@ function Root() {
   const { colors, isDark } = useTheme()
   const t = useT()
   const [initialState] = useState(launchState)
+  const { locked } = useLock()
 
   // Startup jobs below wait for a complete profile AND a closed Onboarding
   // (the profile is saved before the optional account step): nothing may
@@ -290,6 +296,11 @@ function Root() {
           options={{ title: t('nav.feeRule'), ...stackHeader }}
         />
         <Stack.Screen
+          name="LockSettings"
+          component={LockSettingsScreen}
+          options={{ title: t('settings.lock'), ...stackHeader }}
+        />
+        <Stack.Screen
           name="About"
           component={AboutScreen}
           options={{ title: t('nav.about'), ...stackHeader }}
@@ -297,7 +308,7 @@ function Root() {
       </Stack.Navigator>
 
       <UpdateModal
-        visible={!!updateInfo}
+        visible={!!updateInfo && !locked}
         info={updateInfo}
         onLater={() => {
           if (updateInfo) dismissUpdateVersion(updateInfo.latest)
@@ -370,7 +381,9 @@ export default function App() {
             <CurrencyProvider>
               <FiltersProvider>
                 <PrivacyProvider>
-                  <Root />
+                  <LockProvider>
+                    <Root />
+                  </LockProvider>
                 </PrivacyProvider>
               </FiltersProvider>
             </CurrencyProvider>

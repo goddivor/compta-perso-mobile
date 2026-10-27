@@ -2,7 +2,7 @@
   "expo": {
     "name": "Compta Perso",
     "slug": "compta-perso-mobile",
-    "version": "2.1.0",
+    "version": "2.2.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -11,13 +11,20 @@
     },
     "android": {
       "package": "com.divor.comptaperso",
-      "permissions": ["REQUEST_INSTALL_PACKAGES"],
+      "permissions": [
+        "REQUEST_INSTALL_PACKAGES",
+        "USE_BIOMETRIC",
+        "USE_FINGERPRINT"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
-      }
+      },
+      "blockedPermissions": [
+        "android.permission.READ_MEDIA_IMAGES"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -25,7 +32,9 @@
     "plugins": [
       "expo-sqlite",
       "expo-font",
-      "expo-localization"
+      "expo-localization",
+      "expo-secure-store",
+      "expo-local-authentication"
     ]
   }
 }

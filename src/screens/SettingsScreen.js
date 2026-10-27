@@ -1,4 +1,4 @@
-// Settings hub (v2): Profil / Données / Préférences / À propos. Monochrome
+// Settings hub (v2): Profil / Données / Sécurité / Préférences / À propos. Monochrome
 // icons on neutral tiles; sub-titles are data only (count, date, address,
 // version). The country row is fixed: flag, country, currency, no action;
 // without a country it still shows the currency (no flag).
@@ -18,6 +18,7 @@ import { useI18n } from '../i18n'
 import { Flag } from '../components/v2'
 import { SettingsRow, RowSeparator, SectionCard, shortDateTime } from '../components/SettingsRow'
 import { getCurrentVersion } from '../updates/updater'
+import { useLock } from '../context/LockContext'
 
 export default function SettingsScreen({ navigation }) {
   const { colors, mode } = useTheme()
@@ -30,6 +31,7 @@ export default function SettingsScreen({ navigation }) {
   const [counts, setCounts] = useState({ accounts: 0, categories: 0 })
   const [syncCfg, setSyncCfg] = useState(null)
   const [googleAccount, setGoogleAccount] = useState(null)
+  const { config: lock } = useLock()
 
   useFocusData(() => {
     setCounts({ accounts: listAccounts().length, categories: listCategories().length })
@@ -45,6 +47,10 @@ export default function SettingsScreen({ navigation }) {
   const lang = language === 'en' ? 'en' : 'fr'
   const countryName = country ? country.name[lang] || country.name.en : profile.country_iso2
   const currencyName = currency ? currency.name[lang] || currency.name.en : profile.currency
+  const lockMethod = t(lock.method === 'pattern' ? 'lock.pattern' : 'lock.pin')
+  const lockSubtitle = !lock.enabled
+    ? t('lock.off')
+    : lock.fingerprint ? t('lock.withFingerprint', { method: lockMethod }) : lockMethod
   const syncSubtitle = syncCfg && isConfigured(syncCfg) ? shortDateTime(syncCfg.last_push) : ''
 
   return (
@@ -97,6 +103,15 @@ export default function SettingsScreen({ navigation }) {
             subtitle={googleAccount?.email || ''}
             onPress={() => navigation.navigate('GoogleBackup')}
             wrap
+          />
+        </SectionCard>
+
+        <SectionCard title={t('settings.security')}>
+          <SettingsRow
+            icon="lock-closed-outline"
+            title={t('settings.lock')}
+            subtitle={lockSubtitle}
+            onPress={() => navigation.navigate('LockSettings')}
           />
         </SectionCard>
 
