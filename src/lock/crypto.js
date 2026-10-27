@@ -2,6 +2,7 @@
 // it only supplies the random salt). The HMAC inner and outer states are
 // computed once per key, so each iteration costs two SHA-256 compressions.
 // Inputs and outputs are byte arrays; nothing here logs or stores anything.
+import { utf8Bytes } from '../registry/sha256'
 
 const K = new Int32Array([
   0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
@@ -68,10 +69,8 @@ function wordsToBytes(words) {
   return out
 }
 
-// UTF-8 bytes of a short ASCII-or-not string
-export function utf8(str) {
-  return new Uint8Array(unescape(encodeURIComponent(String(str))).split('').map((c) => c.charCodeAt(0)))
-}
+// UTF-8 bytes of a string (the registry's encoder, shared)
+export const utf8 = (str) => utf8Bytes(String(str))
 
 /** PBKDF2-HMAC-SHA256, 32-byte output (a single block). */
 export function pbkdf2(password, salt, iterations) {
