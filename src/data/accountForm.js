@@ -17,12 +17,21 @@ export function kindControls({ savedId, type, operatorId }) {
 // "Enregistrer" only.
 export const saveBeforeRule = (savedId) => !savedId
 
+// Typed text of a whole amount: digits only (amounts are whole units, and
+// "50,000" or "50.000" is a grouped 50000 in many countries, never 50).
+// `negative`: keeps a leading minus (a starting balance may be negative).
+export function wholeAmountText(text, { negative = false } = {}) {
+  const s = String(text ?? '')
+  const digits = s.replace(/\D/g, '').slice(0, 12)
+  return negative && /^\s*[-\u2212]/.test(s) ? `-${digits}` : digits
+}
+
 // Starting balance to save. v1 stored parseFloat values, so an account may
 // hold a decimal balance: until the field is edited, `exact` is the stored
-// number and is saved as is. A typed value is parsed to whole FCFA.
+// number and is saved as is. A typed value is read as a whole amount.
 export function balanceToSave(text, exact) {
   if (exact != null) return exact
-  return Math.round(parseFloat(String(text).replace(/\s/g, '').replace(',', '.')) || 0)
+  return parseInt(wholeAmountText(text, { negative: true }), 10) || 0
 }
 
 // Only active consumer operators can be picked: not rebranded, merged or
