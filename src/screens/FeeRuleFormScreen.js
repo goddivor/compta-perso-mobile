@@ -24,7 +24,11 @@ const FOLD_ABOVE = 8
 
 let rowKey = 0
 const newRow = (max = '', fee = '') => ({ k: ++rowKey, max: String(max), fee: String(fee) })
-const num = (s) => Number(String(s).replace(/\s/g, '').replace(',', '.'))
+// A typed percentage: "1,5" or "1.5" (decimal comma or point)
+const pctNum = (s) => Number(String(s).replace(/\s/g, '').replace(',', '.'))
+// A typed amount: whole units, digits only ("5,000" is 5000, never 5)
+const digits = (v) => String(v ?? '').replace(/\D/g, '').slice(0, 12)
+const num = (s) => (s === '' ? NaN : Number(digits(s)))
 
 export default function FeeRuleFormScreen({ navigation, route }) {
   const { label: currencyLabel } = useAmountFormat()
@@ -65,7 +69,7 @@ export default function FeeRuleFormScreen({ navigation, route }) {
   // What can be saved, or null when the form is incomplete
   const payload = useMemo(() => {
     if (kind === 'percent') {
-      const p = num(pct)
+      const p = pctNum(pct)
       return pct !== '' && p > 0 && p <= 100 ? { kind, value: Number((p / 100).toPrecision(12)) } : null
     }
     if (kind === 'fixed') {
@@ -128,7 +132,7 @@ export default function FeeRuleFormScreen({ navigation, route }) {
 
         {kind === 'fixed' ? (
           <Field label={t('feeRule.amount')}>
-            <SuffixInput keyboardType="numeric" value={fixed} onChangeText={setFixed} prefix={symbolLeads ? currencyLabel : undefined} suffix={symbolLeads ? undefined : currencyLabel} placeholder="0" />
+            <SuffixInput keyboardType="number-pad" value={fixed} onChangeText={(v) => setFixed(digits(v))} prefix={symbolLeads ? currencyLabel : undefined} suffix={symbolLeads ? undefined : currencyLabel} placeholder="0" />
           </Field>
         ) : null}
 
@@ -149,9 +153,9 @@ export default function FeeRuleFormScreen({ navigation, route }) {
                       <Text style={[styles.range, { color: colors.muted }]}>{start != null ? `${fmtNumber(start)} –` : '–'}</Text>
                       <TextInput
                         value={r.max}
-                        onChangeText={(v) => setRow(r.k, { max: v.replace(/[^0-9]/g, '') })}
+                        onChangeText={(v) => setRow(r.k, { max: digits(v) })}
                         onEndEditing={sortRows}
-                        keyboardType="numeric"
+                        keyboardType="number-pad"
                         placeholder="0"
                         placeholderTextColor={colors.faint}
                         style={[styles.cellInput, { color: colors.ink }]}
@@ -160,8 +164,8 @@ export default function FeeRuleFormScreen({ navigation, route }) {
                     <View style={[styles.cell, { width: 110 }]}>
                       <TextInput
                         value={r.fee}
-                        onChangeText={(v) => setRow(r.k, { fee: v.replace(/[^0-9]/g, '') })}
-                        keyboardType="numeric"
+                        onChangeText={(v) => setRow(r.k, { fee: digits(v) })}
+                        keyboardType="number-pad"
                         placeholder="0"
                         placeholderTextColor={colors.faint}
                         style={[styles.cellInput, { color: colors.ink, fontFamily: fonts.bold }]}

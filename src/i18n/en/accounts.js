@@ -23,6 +23,8 @@ export default {
   'accounts.group.money_transfer': 'Money transfer',
   'accounts.group.investment': 'Investment',
   'accounts.group.international': 'International',
+  'accounts.type.other': 'Other',
+  'accounts.group.other': 'Other',
 
   /* ----------------------- New account (search) -------------------------- */
   'accountForm.searchPlaceholder': 'Search banks & wallets',
